@@ -1,4 +1,7 @@
 public inherited sharing class IntegrationConfigService {
+    @TestVisible
+    private static Map<String, Config> testConfigs = new Map<String, Config>();
+
     public class Config {
         public String integrationKey;
         public String namedCredential;
@@ -17,6 +20,10 @@ public inherited sharing class IntegrationConfigService {
     }
 
     public static Config get(String integrationKey) {
+        if (Test.isRunningTest() && testConfigs.containsKey(integrationKey)) {
+            return testConfigs.get(integrationKey);
+        }
+
         IntegrationDefinition__mdt definition = IntegrationDefinition__mdt.getInstance(integrationKey);
         if (definition == null) {
             throw new IntegrationConfigurationException('Missing IntegrationDefinition__mdt for ' + integrationKey);
@@ -53,6 +60,16 @@ public inherited sharing class IntegrationConfigService {
             config.retryableStatusCodes.addAll(new Set<Integer>{408, 429, 500, 502, 503, 504});
         }
         return config;
+    }
+
+    @TestVisible
+    private static void setTestConfig(Config config) {
+        testConfigs.put(config.integrationKey, config);
+    }
+
+    @TestVisible
+    private static void clearTestConfigs() {
+        testConfigs.clear();
     }
 
     private static Integer integerValue(Decimal value, Integer fallback) {

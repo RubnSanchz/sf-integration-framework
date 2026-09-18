@@ -18,7 +18,11 @@ public class IntegrationSanitizer {
         String sanitized = value;
         for (String key : SENSITIVE_KEYS) {
             sanitized = sanitized.replaceAll(
-                '(?i)(["\\']?' + key + '["\\']?\\s*[:=]\\s*["\\']?)[^"\\',}\\s]+',
+                '(?i)("' + key + '"\\s*:\\s*")[^"]*(")',
+                '$1[REDACTED]$2'
+            );
+            sanitized = sanitized.replaceAll(
+                '(?i)(' + key + '=)[^&\\s]*',
                 '$1[REDACTED]'
             );
         }

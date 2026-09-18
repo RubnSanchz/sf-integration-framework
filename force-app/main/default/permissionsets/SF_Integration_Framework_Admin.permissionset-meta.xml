@@ -10,7 +10,6 @@
         <allowRead>true</allowRead>
         <modifyAllRecords>true</modifyAllRecords>
         <object>IntegrationTransaction__c</object>
-        <viewAllFields>true</viewAllFields>
         <viewAllRecords>true</viewAllRecords>
     </objectPermissions>
     <fieldPermissions>
@@ -100,7 +99,6 @@
         <allowRead>true</allowRead>
         <modifyAllRecords>true</modifyAllRecords>
         <object>IntegrationAttempt__c</object>
-        <viewAllFields>true</viewAllFields>
         <viewAllRecords>true</viewAllRecords>
     </objectPermissions>
     <fieldPermissions>
