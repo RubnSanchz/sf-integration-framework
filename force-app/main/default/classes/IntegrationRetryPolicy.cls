@@ -6,7 +6,9 @@ public class IntegrationRetryPolicy {
         Integer attempts = transactionRecord.AttemptCount__c == null
             ? 0
             : transactionRecord.AttemptCount__c.intValue();
-        return config.retryEnabled && attempts < config.maxRetries;
+
+        // MaxRetries means retries after the first execution attempt.
+        return config.retryEnabled && attempts <= config.maxRetries;
     }
 
     public static Datetime nextRetryAt(

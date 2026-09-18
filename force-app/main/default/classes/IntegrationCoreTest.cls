@@ -54,6 +54,9 @@ private class IntegrationCoreTest {
         System.assert(retryAt >= beforeValue && retryAt <= afterValue);
 
         transactionRecord.AttemptCount__c = 3;
+        System.assertEquals(true, IntegrationRetryPolicy.canRetry(transactionRecord, config));
+
+        transactionRecord.AttemptCount__c = 4;
         System.assertEquals(false, IntegrationRetryPolicy.canRetry(transactionRecord, config));
     }
 
