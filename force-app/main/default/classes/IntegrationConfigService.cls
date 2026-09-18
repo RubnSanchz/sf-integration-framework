@@ -2,9 +2,12 @@ public inherited sharing class IntegrationConfigService {
     public class Config {
         public String integrationKey;
         public String namedCredential;
+        public String handlerClass;
+        public String idempotencyHeader;
         public Integer timeoutMs;
         public Integer processingLeaseSeconds;
         public Integer maxRetries;
+        public Integer retryBaseDelaySeconds;
         public Boolean retryEnabled;
         public Boolean idempotencyEnabled;
         public Boolean logRequestBody;
@@ -22,9 +25,14 @@ public inherited sharing class IntegrationConfigService {
         Config config = new Config();
         config.integrationKey = integrationKey;
         config.namedCredential = definition.NamedCredential__c;
+        config.handlerClass = definition.HandlerClass__c;
+        config.idempotencyHeader = String.isBlank(definition.IdempotencyHeader__c)
+            ? 'Idempotency-Key'
+            : definition.IdempotencyHeader__c;
         config.timeoutMs = integerValue(definition.TimeoutMs__c, 30000);
         config.processingLeaseSeconds = integerValue(definition.ProcessingLeaseSeconds__c, 60);
         config.maxRetries = integerValue(definition.MaxRetries__c, 3);
+        config.retryBaseDelaySeconds = integerValue(definition.RetryBaseDelaySeconds__c, 60);
         config.retryEnabled = definition.RetryEnabled__c;
         config.idempotencyEnabled = definition.IdempotencyEnabled__c;
         config.logRequestBody = definition.LogRequestBody__c;
@@ -41,6 +49,8 @@ public inherited sharing class IntegrationConfigService {
                     );
                 }
             }
+        } else {
+            config.retryableStatusCodes.addAll(new Set<Integer>{408, 429, 500, 502, 503, 504});
         }
         return config;
     }

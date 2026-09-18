@@ -19,7 +19,7 @@ public inherited sharing class IntegrationTransactionService {
 
     public static IntegrationTransaction__c claim(Id transactionId, Integer leaseSeconds) {
         IntegrationTransaction__c transactionRecord = [
-            SELECT Id, Status__c, AttemptCount__c, LeaseExpiresAt__c,
+            SELECT Id, Status__c, AttemptCount__c, LeaseExpiresAt__c, NextRetryAt__c,
                    IntegrationKey__c, IdempotencyKey__c, Operation__c,
                    ObjectApiName__c, RecordId__c
             FROM IntegrationTransaction__c
@@ -28,8 +28,11 @@ public inherited sharing class IntegrationTransactionService {
             FOR UPDATE
         ];
 
-        if (transactionRecord.Status__c != IntegrationConstants.STATUS_PENDING &&
-            transactionRecord.Status__c != IntegrationConstants.STATUS_ERROR) {
+        Boolean pending = transactionRecord.Status__c == IntegrationConstants.STATUS_PENDING;
+        Boolean retryDue = transactionRecord.Status__c == IntegrationConstants.STATUS_ERROR &&
+            (transactionRecord.NextRetryAt__c == null || transactionRecord.NextRetryAt__c <= System.now());
+
+        if (!pending && !retryDue) {
             return null;
         }
 
@@ -41,6 +44,7 @@ public inherited sharing class IntegrationTransactionService {
         transactionRecord.LastAttemptAt__c = nowValue;
         transactionRecord.AttemptCount__c =
             (transactionRecord.AttemptCount__c == null ? 0 : transactionRecord.AttemptCount__c) + 1;
+        transactionRecord.NextRetryAt__c = null;
         transactionRecord.ErrorCode__c = null;
         transactionRecord.ErrorMessage__c = null;
         update transactionRecord;
@@ -79,6 +83,15 @@ public inherited sharing class IntegrationTransactionService {
             NextRetryAt__c = null,
             ErrorCode__c = code,
             ErrorMessage__c = message
+        );
+    }
+
+    public static void resetToPending(Id transactionId) {
+        update new IntegrationTransaction__c(
+            Id = transactionId,
+            Status__c = IntegrationConstants.STATUS_PENDING,
+            LeaseExpiresAt__c = null,
+            NextRetryAt__c = null
         );
     }
 
