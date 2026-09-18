@@ -17,8 +17,11 @@ public class IntegrationRetryPolicy {
             ? 1
             : Math.max(1, transactionRecord.AttemptCount__c.intValue());
         Integer exponent = Math.min(attempts - 1, 10);
-        Decimal multiplier = Math.pow(2, exponent);
-        Integer delay = (Decimal.valueOf(config.retryBaseDelaySeconds) * multiplier).intValue();
+        Integer multiplier = 1;
+        for (Integer i = 0; i < exponent; i++) {
+            multiplier *= 2;
+        }
+        Integer delay = config.retryBaseDelaySeconds * multiplier;
         return System.now().addSeconds(delay);
     }
 }
