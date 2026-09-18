@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <label>Result</label>
+    <type>Picklist</type>
+    <valueSet>
+        <restricted>true</restricted>
+        <valueSetDefinition>
+            <value>
+                <fullName>SUCCESS</fullName>
+                <default>false</default>
+                <label>SUCCESS</label>
+            </value>
+            <value>
+                <fullName>ERROR</fullName>
+                <default>false</default>
+                <label>ERROR</label>
+            </value>
+            <value>
+                <fullName>UNKNOWN</fullName>
+                <default>false</default>
+                <label>UNKNOWN</label>
+            </value>
+        </valueSetDefinition>
+    </valueSet>
+</CustomField>
