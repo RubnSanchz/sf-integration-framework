@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Package xmlns="http://soap.sforce.com/2006/04/metadata">
+    <types>
+        <members>IntegrationAttemptService</members>
+        <members>IntegrationClaimJob</members>
+        <members>IntegrationConfigService</members>
+        <members>IntegrationConstants</members>
+        <members>IntegrationCoreTest</members>
+        <members>IntegrationDispatchScheduler</members>
+        <members>IntegrationExecutionJob</members>
+        <members>IntegrationFramework</members>
+        <members>IntegrationHandlerFactory</members>
+        <members>IntegrationHttpClient</members>
+        <members>IntegrationOperationHandler</members>
+        <members>IntegrationRecoveryScheduler</members>
+        <members>IntegrationRequest</members>
+        <members>IntegrationResponse</members>
+        <members>IntegrationRetryPolicy</members>
+        <members>IntegrationSanitizer</members>
+        <members>IntegrationTransactionService</members>
+        <name>ApexClass</name>
+    </types>
+    <types>
+        <members>IntegrationAttempt__c</members>
+        <members>IntegrationTransaction__c</members>
+        <name>CustomObject</name>
+    </types>
+    <types>
+        <members>IntegrationDefinition__mdt</members>
+        <name>CustomObject</name>
+    </types>
+    <types>
+        <members>SF_Integration_Framework_Admin</members>
+        <name>PermissionSet</name>
+    </types>
+    <version>67.0</version>
+</Package>

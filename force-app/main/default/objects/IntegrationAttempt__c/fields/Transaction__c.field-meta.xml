@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <label>Transaction</label>
+    <referenceTo>IntegrationTransaction__c</referenceTo>
+    <relationshipLabel>Integration Attempts</relationshipLabel>
+    <relationshipName>IntegrationAttempts</relationshipName>
+    <reparentableMasterDetail>false</reparentableMasterDetail>
+    <type>MasterDetail</type>
+    <writeRequiresMasterRead>false</writeRequiresMasterRead>
+</CustomField>
