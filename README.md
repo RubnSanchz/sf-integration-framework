@@ -85,6 +85,40 @@ sf project deploy start --target-org sif-scratch
 sf apex run test --target-org sif-scratch --test-level RunLocalTests --wait 20
 ```
 
+## Manual deployment without installing the package
+
+The repository also includes `manifest/package.xml` so the framework can be deployed directly to an org without first creating or installing an Unlocked Package.
+
+Authenticate the target org:
+
+```bash
+sf org login web --alias target-org
+```
+
+Validate the deployment first:
+
+```bash
+sf project deploy validate \
+  --manifest manifest/package.xml \
+  --target-org target-org \
+  --test-level RunLocalTests \
+  --wait 30
+```
+
+Deploy it:
+
+```bash
+sf project deploy start \
+  --manifest manifest/package.xml \
+  --target-org target-org \
+  --test-level RunLocalTests \
+  --wait 30
+```
+
+The manifest contains the framework Apex classes, custom objects, Custom Metadata type and packaged permission set. It intentionally does **not** include environment-specific Named Credentials, External Credentials, principals, tokens or secrets.
+
+After deployment, configure the target org exactly as you would after package installation: create the Named Credentials/External Credentials and the required `IntegrationDefinition__mdt` records.
+
 ## Create the Unlocked Package
 
 The package itself is created once in the selected Dev Hub:
