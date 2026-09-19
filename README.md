@@ -1,3 +1,5 @@
+[English](README.md) | [Español](README.es.md)
+
 # sf-integration-framework
 
 Reusable integration framework for Salesforce. It provides durable integration transactions, stable idempotency keys, per-attempt audit records, asynchronous HTTP execution, retry/backoff primitives and stale-work recovery.
@@ -58,8 +60,10 @@ force-app/main/default/
 config/
 `-- project-scratch-def.json
 docs/
-|-- architecture.md
-`-- security.md
+|-- integration-architecture.md
+|-- integration-architecture.es.md
+|-- integration-security.md
+`-- integration-security.es.md
 ```
 
 ## Requirements
@@ -275,7 +279,7 @@ The dispatcher drains `PENDING` and due retry work. Recovery identifies expired 
 - Persisted payloads are redacted and truncated.
 - Treat `IntegrationTransaction__c` and `IntegrationAttempt__c` as operational/audit data and apply org retention policies.
 
-See [docs/security.md](docs/security.md).
+See [docs/integration-security.md](docs/integration-security.md).
 
 ## Current scope / limitations
 

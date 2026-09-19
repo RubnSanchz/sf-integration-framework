@@ -1,3 +1,5 @@
+[English](integration-security.md) | [Español](integration-security.es.md)
+
 # Security model
 
 ## Credentials

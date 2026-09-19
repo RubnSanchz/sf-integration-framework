@@ -1,3 +1,5 @@
+[English](integration-architecture.md) | [Español](integration-architecture.es.md)
+
 # Architecture
 
 ## Design principles

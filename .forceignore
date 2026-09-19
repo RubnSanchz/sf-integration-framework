@@ -1,0 +1,3 @@
+# Files under force-app that must never be treated as Salesforce metadata.
+# Claude Code guidance files are documentation for tooling, not package content.
+**/CLAUDE.md
