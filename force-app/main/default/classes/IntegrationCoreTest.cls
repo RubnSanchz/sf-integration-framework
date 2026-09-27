@@ -60,6 +60,151 @@ private class IntegrationCoreTest {
         System.assertEquals(false, IntegrationRetryPolicy.canRetry(transactionRecord, config));
     }
 
+    // Checkbox fields on a record built in memory read back as false, not as the
+    // defaultValue declared on the field, so they are set here explicitly to
+    // mirror what a stored IntegrationDefinition__mdt record would carry.
+    private static IntegrationDefinition__mdt definition() {
+        return new IntegrationDefinition__mdt(
+            NamedCredential__c = 'Test_Named_Credential',
+            HandlerClass__c = 'UnusedHandler',
+            RetryEnabled__c = true,
+            IdempotencyEnabled__c = true,
+            LogRequestBody__c = false,
+            LogResponseBody__c = false
+        );
+    }
+
+    private static String rejectionMessage(IntegrationDefinition__mdt definition) {
+        try {
+            IntegrationConfigService.fromDefinition('TEST', definition);
+            return null;
+        } catch (IntegrationConfigService.IntegrationConfigurationException ex) {
+            return ex.getMessage();
+        }
+    }
+
+    @IsTest
+    static void configParsingAppliesDocumentedDefaults() {
+        IntegrationConfigService.Config config =
+            IntegrationConfigService.fromDefinition('TEST', definition());
+
+        System.assertEquals('Idempotency-Key', config.idempotencyHeader);
+        System.assertEquals(30000, config.timeoutMs);
+        System.assertEquals(60, config.processingLeaseSeconds);
+        System.assertEquals(3, config.maxRetries);
+        System.assertEquals(60, config.retryBaseDelaySeconds);
+        System.assertEquals(12000, config.maxPayloadChars);
+        System.assertEquals(true, config.retryEnabled);
+        System.assertEquals(true, config.idempotencyEnabled);
+        System.assertEquals(false, config.logRequestBody);
+        System.assertEquals(false, config.logResponseBody);
+        System.assertEquals(
+            new Set<Integer>{408, 429, 500, 502, 503, 504},
+            config.retryableStatusCodes
+        );
+
+        // Checkbox fields are never null on an sObject: assigning null stores false,
+        // so the parser has nothing to guard against.
+        IntegrationDefinition__mdt nulled = definition();
+        nulled.RetryEnabled__c = null;
+        System.assertEquals(
+            false,
+            IntegrationConfigService.fromDefinition('TEST', nulled).retryEnabled
+        );
+    }
+
+    @IsTest
+    static void configValidationRejectsOutOfRangeValues() {
+        IntegrationDefinition__mdt tooFast = definition();
+        tooFast.TimeoutMs__c = 0;
+        System.assert(rejectionMessage(tooFast).contains('TimeoutMs__c'), rejectionMessage(tooFast));
+        System.assert(rejectionMessage(tooFast).contains('TEST'), 'The message must name the integration.');
+
+        IntegrationDefinition__mdt tooSlow = definition();
+        tooSlow.TimeoutMs__c = 120001;
+        tooSlow.ProcessingLeaseSeconds__c = 300;
+        System.assert(rejectionMessage(tooSlow).contains('TimeoutMs__c'), rejectionMessage(tooSlow));
+
+        // 60 s of callout needs at least 90 s of lease, or recovery reclaims live work.
+        IntegrationDefinition__mdt shortLease = definition();
+        shortLease.TimeoutMs__c = 60000;
+        System.assert(
+            rejectionMessage(shortLease).contains('ProcessingLeaseSeconds__c'),
+            rejectionMessage(shortLease)
+        );
+
+        IntegrationDefinition__mdt noPayload = definition();
+        noPayload.MaxPayloadChars__c = 0;
+        System.assert(rejectionMessage(noPayload).contains('MaxPayloadChars__c'), rejectionMessage(noPayload));
+
+        IntegrationDefinition__mdt hugePayload = definition();
+        hugePayload.MaxPayloadChars__c = 32769;
+        System.assert(rejectionMessage(hugePayload).contains('MaxPayloadChars__c'), rejectionMessage(hugePayload));
+
+        IntegrationDefinition__mdt negativeRetries = definition();
+        negativeRetries.MaxRetries__c = -1;
+        System.assert(rejectionMessage(negativeRetries).contains('MaxRetries__c'), rejectionMessage(negativeRetries));
+
+        IntegrationDefinition__mdt noDelay = definition();
+        noDelay.RetryBaseDelaySeconds__c = 0;
+        System.assert(
+            rejectionMessage(noDelay).contains('RetryBaseDelaySeconds__c'),
+            rejectionMessage(noDelay)
+        );
+    }
+
+    @IsTest
+    static void configValidationAcceptsTheBoundaries() {
+        IntegrationDefinition__mdt boundary = definition();
+        boundary.TimeoutMs__c = 120000;
+        boundary.ProcessingLeaseSeconds__c = 150;
+        boundary.MaxPayloadChars__c = 32768;
+        boundary.MaxRetries__c = 0;
+        boundary.RetryBaseDelaySeconds__c = 1;
+
+        System.assertEquals(null, rejectionMessage(boundary), 'The exact boundaries must be valid.');
+
+        // The shipped defaults have to satisfy their own rules.
+        System.assertEquals(null, rejectionMessage(definition()));
+    }
+
+    @IsTest
+    static void configParsesRetryableStatusCodes() {
+        IntegrationDefinition__mdt listed = definition();
+        listed.RetryableStatusCodes__c = '408, 500 ,503';
+        System.assertEquals(
+            new Set<Integer>{408, 500, 503},
+            IntegrationConfigService.fromDefinition('TEST', listed).retryableStatusCodes
+        );
+
+        IntegrationDefinition__mdt broken = definition();
+        broken.RetryableStatusCodes__c = '408,abc';
+        String message = rejectionMessage(broken);
+        System.assert(message != null && message.contains('abc'), message);
+    }
+
+    @IsTest
+    static void configIsCachedPerTransaction() {
+        IntegrationDefinition__mdt first = definition();
+        first.TimeoutMs__c = 20000;
+        IntegrationConfigService.Config initial = IntegrationConfigService.cached('CACHED', first);
+
+        IntegrationDefinition__mdt second = definition();
+        second.TimeoutMs__c = 45000;
+        second.ProcessingLeaseSeconds__c = 120;
+        IntegrationConfigService.Config again = IntegrationConfigService.cached('CACHED', second);
+
+        System.assert(initial === again, 'The same key must return the same instance.');
+        System.assertEquals(20000, again.timeoutMs, 'The second definition must not be parsed again.');
+
+        IntegrationConfigService.clearTestConfigs();
+        System.assertEquals(
+            45000,
+            IntegrationConfigService.cached('CACHED', second).timeoutMs,
+            'Clearing the test state must also clear the cache.'
+        );
+    }
+
     @IsTest
     static void sanitizerRedactsSecretsAndTruncatesPayloads() {
         String payload = '{"access_token":"secret","password":"hidden","value":"safe"}';
