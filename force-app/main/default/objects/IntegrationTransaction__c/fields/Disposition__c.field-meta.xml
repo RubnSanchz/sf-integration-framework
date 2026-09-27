@@ -1,36 +1,36 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
-    <fullName>Status__c</fullName>
-    <label>Status</label>
+    <fullName>Disposition__c</fullName>
+    <label>Disposition</label>
     <trackHistory>true</trackHistory>
     <type>Picklist</type>
     <valueSet>
         <restricted>true</restricted>
         <valueSetDefinition>
             <value>
-                <fullName>PENDING</fullName>
+                <fullName>NONE</fullName>
                 <default>true</default>
-                <label>PENDING</label>
+                <label>NONE</label>
             </value>
             <value>
-                <fullName>PROCESSING</fullName>
+                <fullName>RETRY</fullName>
                 <default>false</default>
-                <label>PROCESSING</label>
+                <label>RETRY</label>
             </value>
             <value>
-                <fullName>SUCCESS</fullName>
+                <fullName>RECONCILE</fullName>
                 <default>false</default>
-                <label>SUCCESS</label>
+                <label>RECONCILE</label>
             </value>
             <value>
-                <fullName>ERROR</fullName>
+                <fullName>MANUAL</fullName>
                 <default>false</default>
-                <label>ERROR</label>
+                <label>MANUAL</label>
             </value>
             <value>
-                <fullName>UNKNOWN</fullName>
+                <fullName>TERMINAL</fullName>
                 <default>false</default>
-                <label>UNKNOWN</label>
+                <label>TERMINAL</label>
             </value>
         </valueSetDefinition>
     </valueSet>

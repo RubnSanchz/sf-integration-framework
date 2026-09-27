@@ -38,6 +38,15 @@ private class IntegrationCoreTest {
 
         IntegrationTransaction__c secondClaim = IntegrationTransactionService.claim(created.Id, 120);
         System.assertEquals(null, secondClaim, 'A PROCESSING transaction must not be claimed twice.');
+
+        IntegrationTransaction__c stored = [
+            SELECT Disposition__c FROM IntegrationTransaction__c WHERE Id = :created.Id
+        ];
+        System.assertEquals(
+            IntegrationConstants.DISPOSITION_NONE,
+            stored.Disposition__c,
+            'A transaction starts with nothing for the system to do about it.'
+        );
     }
 
     @IsTest
@@ -63,6 +72,50 @@ private class IntegrationCoreTest {
     // Checkbox fields on a record built in memory read back as false, not as the
     // defaultValue declared on the field, so they are set here explicitly to
     // mirror what a stored IntegrationDefinition__mdt record would carry.
+    private static Set<String> picklistValues(Schema.SObjectField field) {
+        Set<String> values = new Set<String>();
+        for (Schema.PicklistEntry entry : field.getDescribe().getPicklistValues()) {
+            values.add(entry.getValue());
+        }
+        return values;
+    }
+
+    // CLAUDE.md requires the Apex constants and the restricted picklists to stay
+    // in step. A mismatch only shows up as a DML error at runtime.
+    @IsTest
+    static void constantsMatchTheRestrictedPicklists() {
+        System.assertEquals(
+            new Set<String>{
+                IntegrationConstants.DISPOSITION_NONE,
+                IntegrationConstants.DISPOSITION_RETRY,
+                IntegrationConstants.DISPOSITION_RECONCILE,
+                IntegrationConstants.DISPOSITION_MANUAL,
+                IntegrationConstants.DISPOSITION_TERMINAL
+            },
+            picklistValues(IntegrationTransaction__c.Disposition__c)
+        );
+
+        System.assertEquals(
+            new Set<String>{
+                IntegrationConstants.STATUS_PENDING,
+                IntegrationConstants.STATUS_PROCESSING,
+                IntegrationConstants.STATUS_SUCCESS,
+                IntegrationConstants.STATUS_ERROR,
+                IntegrationConstants.STATUS_UNKNOWN
+            },
+            picklistValues(IntegrationTransaction__c.Status__c)
+        );
+
+        System.assertEquals(
+            new Set<String>{
+                IntegrationConstants.RESULT_SUCCESS,
+                IntegrationConstants.RESULT_ERROR,
+                IntegrationConstants.RESULT_UNKNOWN
+            },
+            picklistValues(IntegrationAttempt__c.Result__c)
+        );
+    }
+
     private static IntegrationDefinition__mdt definition() {
         return new IntegrationDefinition__mdt(
             NamedCredential__c = 'Test_Named_Credential',

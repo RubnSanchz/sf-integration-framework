@@ -68,6 +68,11 @@
     </fieldPermissions>
     <fieldPermissions>
         <editable>true</editable>
+        <field>IntegrationTransaction__c.Disposition__c</field>
+        <readable>true</readable>
+    </fieldPermissions>
+    <fieldPermissions>
+        <editable>true</editable>
         <field>IntegrationAttempt__c.AttemptNumber__c</field>
         <readable>true</readable>
     </fieldPermissions>
