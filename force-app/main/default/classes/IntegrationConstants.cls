@@ -31,6 +31,9 @@ public class IntegrationConstants {
     // Recorded on the attempt of a worker that lost ownership of its transaction.
     public static final String ERROR_SUPERSEDED = 'SUPERSEDED';
 
+    // Recorded by the recovery scheduler on a lease that ran out with no result.
+    public static final String ERROR_STALE_LEASE = 'STALE_LEASE';
+
     // From the callout onwards the remote side effect is uncertain.
     public static final String ERROR_CALLOUT_EXCEPTION = 'CALLOUT_EXCEPTION';
     public static final String ERROR_CLIENT = 'CLIENT_ERROR';

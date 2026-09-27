@@ -358,35 +358,223 @@ private class IntegrationCoreTest {
         System.assert(stored.ErrorMessage__c.contains('[REDACTED]'), stored.ErrorMessage__c);
     }
 
-    @IsTest
-    static void recoveryRequeuesOnlyIdempotentStaleTransactions() {
-        configure(true);
+    private static IntegrationTransaction__c staleProcessing(String key, Integer attemptCount) {
         IntegrationTransaction__c stale = new IntegrationTransaction__c(
-            IdempotencyKey__c = 'stale-001',
+            IdempotencyKey__c = key,
             IntegrationKey__c = 'TEST',
             Operation__c = 'CREATE',
             Direction__c = 'OUTBOUND',
             Status__c = IntegrationConstants.STATUS_PROCESSING,
-            AttemptCount__c = 1,
+            AttemptCount__c = attemptCount,
             ProcessingStartedAt__c = System.now().addMinutes(-10),
             LeaseExpiresAt__c = System.now().addMinutes(-5)
         );
         insert stale;
+        return stale;
+    }
 
-        IntegrationRecoveryScheduler scheduler = new IntegrationRecoveryScheduler();
-        scheduler.execute(null);
-
-        stale = [
-            SELECT Status__c, ErrorCode__c
+    private static IntegrationTransaction__c stored(Id transactionId) {
+        return [
+            SELECT Status__c, Disposition__c, ErrorCode__c, NextRetryAt__c, LeaseExpiresAt__c
             FROM IntegrationTransaction__c
-            WHERE Id = :stale.Id
+            WHERE Id = :transactionId
         ];
-        System.assertEquals(IntegrationConstants.STATUS_PENDING, stale.Status__c);
-        System.assertEquals('STALE_LEASE', stale.ErrorCode__c);
+    }
 
+    @IsTest
+    static void staleLeaseWithIdempotencyIsScheduledForAnotherAttempt() {
+        configure(true);
+        IntegrationTransaction__c stale = staleProcessing('stale-001', 1);
+
+        new IntegrationRecoveryScheduler().execute(null);
+
+        IntegrationTransaction__c recovered = stored(stale.Id);
+        System.assertEquals(
+            IntegrationConstants.STATUS_UNKNOWN,
+            recovered.Status__c,
+            'The worker died mid-flight, so the outcome is genuinely unknown: it does not go back to PENDING.'
+        );
+        System.assertEquals(IntegrationConstants.DISPOSITION_RETRY, recovered.Disposition__c);
+        System.assertEquals(IntegrationConstants.ERROR_STALE_LEASE, recovered.ErrorCode__c);
+        System.assertNotEquals(null, recovered.NextRetryAt__c, 'RETRY always carries a date.');
+        System.assertEquals(null, recovered.LeaseExpiresAt__c);
         System.assertEquals(
             1,
-            [SELECT COUNT() FROM IntegrationAttempt__c WHERE Transaction__c = :stale.Id]
+            [SELECT COUNT() FROM IntegrationAttempt__c WHERE Transaction__c = :stale.Id],
+            'The expired lease is recorded as a fact.'
+        );
+    }
+
+    // RECONCILE means "uncertain, not yet evaluated". The recovery scheduler is
+    // the evaluator: it turns each one into RETRY or, when nothing automatic can
+    // resolve it, into MANUAL. Both steps run in a single scheduled execution.
+    @IsTest
+    static void staleLeaseWithoutIdempotencyEndsUpNeedingAPerson() {
+        configure(false);
+        IntegrationTransaction__c stale = staleProcessing('stale-002', 1);
+
+        IntegrationRecoveryScheduler.recoverStaleProcessing();
+
+        IntegrationTransaction__c afterFirstStep = stored(stale.Id);
+        System.assertEquals(IntegrationConstants.STATUS_UNKNOWN, afterFirstStep.Status__c);
+        System.assertEquals(
+            IntegrationConstants.DISPOSITION_RECONCILE,
+            afterFirstStep.Disposition__c,
+            'Sending again could duplicate the operation, so it is not a RETRY.'
+        );
+        System.assertEquals(null, afterFirstStep.NextRetryAt__c);
+
+        IntegrationRecoveryScheduler.recoverSafeUnknowns();
+
+        IntegrationTransaction__c afterSecondStep = stored(stale.Id);
+        System.assertEquals(
+            IntegrationConstants.DISPOSITION_MANUAL,
+            afterSecondStep.Disposition__c,
+            'Without idempotency no automatic path exists, so it must reach a person.'
+        );
+        System.assertEquals(
+            IntegrationConstants.STATUS_UNKNOWN,
+            afterSecondStep.Status__c,
+            'The status still records that the remote side may have acted.'
+        );
+    }
+
+    @IsTest
+    static void reconcilableUnknownIsRequeuedOnlyWhileRetriesRemain() {
+        configure(true);
+        IntegrationTransaction__c pendingReview = new IntegrationTransaction__c(
+            IdempotencyKey__c = 'unknown-001',
+            IntegrationKey__c = 'TEST',
+            Operation__c = 'CREATE',
+            Direction__c = 'OUTBOUND',
+            Status__c = IntegrationConstants.STATUS_UNKNOWN,
+            Disposition__c = IntegrationConstants.DISPOSITION_RECONCILE,
+            AttemptCount__c = 1
+        );
+        IntegrationTransaction__c exhausted = new IntegrationTransaction__c(
+            IdempotencyKey__c = 'unknown-002',
+            IntegrationKey__c = 'TEST',
+            Operation__c = 'CREATE',
+            Direction__c = 'OUTBOUND',
+            Status__c = IntegrationConstants.STATUS_UNKNOWN,
+            Disposition__c = IntegrationConstants.DISPOSITION_RECONCILE,
+            AttemptCount__c = 9
+        );
+        insert new List<IntegrationTransaction__c>{pendingReview, exhausted};
+
+        IntegrationRecoveryScheduler.recoverSafeUnknowns();
+
+        System.assertEquals(
+            IntegrationConstants.DISPOSITION_RETRY,
+            stored(pendingReview.Id).Disposition__c
+        );
+        System.assertNotEquals(null, stored(pendingReview.Id).NextRetryAt__c);
+        System.assertEquals(
+            IntegrationConstants.DISPOSITION_MANUAL,
+            stored(exhausted.Id).Disposition__c,
+            'With no retries left it must leave the reconciliation window, or it crowds out newer work.'
+        );
+    }
+
+    @IsTest
+    static void recoveryKeepsGoingWhenOneDefinitionIsBroken() {
+        configure(true);
+        IntegrationTransaction__c healthy = staleProcessing('stale-003', 1);
+        IntegrationTransaction__c broken = staleProcessing('stale-004', 1);
+        broken.IntegrationKey__c = 'NO_SUCH_INTEGRATION';
+        update broken;
+
+        IntegrationRecoveryScheduler.recoverStaleProcessing();
+
+        System.assertEquals(
+            IntegrationConstants.DISPOSITION_RETRY,
+            stored(healthy.Id).Disposition__c,
+            'One broken definition must not stop the rest of the run.'
+        );
+        IntegrationTransaction__c parked = stored(broken.Id);
+        System.assertEquals(IntegrationConstants.DISPOSITION_MANUAL, parked.Disposition__c);
+        System.assertEquals(IntegrationConstants.ERROR_CONFIGURATION, parked.ErrorCode__c);
+    }
+
+    @IsTest
+    static void aRetryIsNotDispatchedBeforeItsDate() {
+        configure(true);
+        IntegrationTransaction__c later = new IntegrationTransaction__c(
+            IdempotencyKey__c = 'future-001',
+            IntegrationKey__c = 'TEST',
+            Operation__c = 'CREATE',
+            Direction__c = 'OUTBOUND',
+            Status__c = IntegrationConstants.STATUS_ERROR,
+            Disposition__c = IntegrationConstants.DISPOSITION_RETRY,
+            NextRetryAt__c = System.now().addMinutes(30),
+            AttemptCount__c = 1
+        );
+        insert later;
+
+        System.assertEquals(
+            null,
+            IntegrationTransactionService.claim(later.Id, 120),
+            'A retry scheduled for later must not be claimed now.'
+        );
+
+        Test.startTest();
+        new IntegrationDispatchScheduler().execute(null);
+        Test.stopTest();
+
+        System.assertEquals(
+            IntegrationConstants.STATUS_ERROR,
+            stored(later.Id).Status__c,
+            'And it must not be dispatched either.'
+        );
+    }
+
+    @IsTest
+    static void aDueRetryIsClaimedWhateverItsStatus() {
+        configure(true);
+        IntegrationTransaction__c due = new IntegrationTransaction__c(
+            IdempotencyKey__c = 'due-001',
+            IntegrationKey__c = 'TEST',
+            Operation__c = 'CREATE',
+            Direction__c = 'OUTBOUND',
+            Status__c = IntegrationConstants.STATUS_UNKNOWN,
+            Disposition__c = IntegrationConstants.DISPOSITION_RETRY,
+            NextRetryAt__c = System.now().addMinutes(-1),
+            AttemptCount__c = 1
+        );
+        insert due;
+
+        IntegrationTransaction__c claimed = IntegrationTransactionService.claim(due.Id, 120);
+        System.assertNotEquals(null, claimed, 'UNKNOWN + RETRY is work the system intends to run again.');
+        System.assertEquals(IntegrationConstants.STATUS_PROCESSING, claimed.Status__c);
+        System.assertEquals(2, claimed.AttemptCount__c);
+        System.assertEquals(
+            IntegrationConstants.DISPOSITION_NONE,
+            stored(due.Id).Disposition__c,
+            'While a worker owns it there is no pending decision.'
+        );
+    }
+
+    @IsTest
+    static void aParkedTransactionIsNeverPickedUpAutomatically() {
+        configure(true);
+        IntegrationTransaction__c parked = new IntegrationTransaction__c(
+            IdempotencyKey__c = 'manual-001',
+            IntegrationKey__c = 'TEST',
+            Operation__c = 'CREATE',
+            Direction__c = 'OUTBOUND',
+            Status__c = IntegrationConstants.STATUS_ERROR,
+            Disposition__c = IntegrationConstants.DISPOSITION_MANUAL,
+            AttemptCount__c = 1
+        );
+        insert parked;
+
+        System.assertEquals(null, IntegrationTransactionService.claim(parked.Id, 120));
+
+        IntegrationRecoveryScheduler.recoverSafeUnknowns();
+        System.assertEquals(
+            IntegrationConstants.DISPOSITION_MANUAL,
+            stored(parked.Id).Disposition__c,
+            'Only an administrator takes it out of MANUAL.'
         );
     }
 }
