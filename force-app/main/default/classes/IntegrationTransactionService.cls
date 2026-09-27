@@ -47,6 +47,8 @@ public inherited sharing class IntegrationTransactionService {
         transactionRecord.NextRetryAt__c = null;
         transactionRecord.ErrorCode__c = null;
         transactionRecord.ErrorMessage__c = null;
+        // While a worker owns the record there is no pending decision about it.
+        transactionRecord.Disposition__c = IntegrationConstants.DISPOSITION_NONE;
         update transactionRecord;
         return transactionRecord;
     }
@@ -55,6 +57,8 @@ public inherited sharing class IntegrationTransactionService {
         update new IntegrationTransaction__c(
             Id = transactionId,
             Status__c = IntegrationConstants.STATUS_SUCCESS,
+            // Clears a RETRY left over from a previous failed attempt.
+            Disposition__c = IntegrationConstants.DISPOSITION_NONE,
             ExternalId__c = externalId,
             CompletedAt__c = System.now(),
             LeaseExpiresAt__c = null,
@@ -64,10 +68,17 @@ public inherited sharing class IntegrationTransactionService {
         );
     }
 
-    public static void markError(Id transactionId, String code, String message, Datetime nextRetryAt) {
+    public static void markError(
+        Id transactionId,
+        String code,
+        String message,
+        Datetime nextRetryAt,
+        String disposition
+    ) {
         update new IntegrationTransaction__c(
             Id = transactionId,
             Status__c = IntegrationConstants.STATUS_ERROR,
+            Disposition__c = disposition,
             LeaseExpiresAt__c = null,
             NextRetryAt__c = nextRetryAt,
             ErrorCode__c = code,
@@ -75,10 +86,11 @@ public inherited sharing class IntegrationTransactionService {
         );
     }
 
-    public static void markUnknown(Id transactionId, String code, String message) {
+    public static void markUnknown(Id transactionId, String code, String message, String disposition) {
         update new IntegrationTransaction__c(
             Id = transactionId,
             Status__c = IntegrationConstants.STATUS_UNKNOWN,
+            Disposition__c = disposition,
             LeaseExpiresAt__c = null,
             NextRetryAt__c = null,
             ErrorCode__c = code,

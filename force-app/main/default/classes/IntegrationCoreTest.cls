@@ -336,7 +336,8 @@ private class IntegrationCoreTest {
             created.Id,
             'CLIENT_ERROR',
             'Callout to /v1/orders?access_token=abc123 failed',
-            null
+            null,
+            IntegrationConstants.DISPOSITION_MANUAL
         );
         IntegrationTransaction__c stored = [
             SELECT ErrorMessage__c FROM IntegrationTransaction__c WHERE Id = :created.Id
@@ -347,7 +348,8 @@ private class IntegrationCoreTest {
         IntegrationTransactionService.markUnknown(
             created.Id,
             'CALLOUT_EXCEPTION',
-            'Read timed out using Bearer abc123def'
+            'Read timed out using Bearer abc123def',
+            IntegrationConstants.DISPOSITION_RECONCILE
         );
         stored = [
             SELECT ErrorMessage__c FROM IntegrationTransaction__c WHERE Id = :created.Id

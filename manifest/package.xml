@@ -8,6 +8,7 @@
         <members>IntegrationCoreTest</members>
         <members>IntegrationDispatchScheduler</members>
         <members>IntegrationExecutionJob</members>
+        <members>IntegrationExecutionJobTest</members>
         <members>IntegrationFramework</members>
         <members>IntegrationHandlerFactory</members>
         <members>IntegrationHttpClient</members>

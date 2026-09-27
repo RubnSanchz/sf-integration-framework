@@ -10,22 +10,28 @@ public inherited sharing class IntegrationAttemptService {
         String errorMessage,
         IntegrationConfigService.Config config
     ) {
+        // config is null when the failure is that the configuration itself could
+        // not be resolved. The attempt still has to be recorded.
+        Integer maxChars = config == null ? null : config.maxPayloadChars;
+        Boolean logRequest = config != null && config.logRequestBody;
+        Boolean logResponse = config != null && config.logResponseBody;
+
         IntegrationAttempt__c attempt = new IntegrationAttempt__c(
             Transaction__c = transactionRecord.Id,
             AttemptNumber__c = transactionRecord.AttemptCount__c,
             StartedAt__c = startedAt,
             FinishedAt__c = System.now(),
             HttpMethod__c = request == null ? null : request.method,
-            EndpointAlias__c = config.namedCredential,
+            EndpointAlias__c = config == null ? null : config.namedCredential,
             HttpStatusCode__c = response == null ? null : response.statusCode,
             Result__c = result,
             ErrorCode__c = errorCode,
-            ErrorMessage__c = IntegrationSanitizer.sanitize(errorMessage, config.maxPayloadChars),
-            RequestBody__c = config.logRequestBody && request != null
-                ? IntegrationSanitizer.sanitize(request.body, config.maxPayloadChars)
+            ErrorMessage__c = IntegrationSanitizer.sanitize(errorMessage, maxChars),
+            RequestBody__c = logRequest && request != null
+                ? IntegrationSanitizer.sanitize(request.body, maxChars)
                 : null,
-            ResponseBody__c = config.logResponseBody && response != null
-                ? IntegrationSanitizer.sanitize(response.body, config.maxPayloadChars)
+            ResponseBody__c = logResponse && response != null
+                ? IntegrationSanitizer.sanitize(response.body, maxChars)
                 : null,
             DurationMs__c = durationMs
         );
