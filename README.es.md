@@ -183,6 +183,41 @@ Después:
 4. Implementa una clase Apex que implemente `IntegrationOperationHandler`.
 5. Programa los jobs de dispatcher/recuperación si quieres recuperación automática y drenado del trabajo pendiente.
 
+
+### Usar el paquete desde tu propio repositorio
+
+Tu repositorio no contiene el código de este paquete. Instalas una versión, igual que harías con cualquier otra dependencia.
+
+Tu repositorio contiene solo lo tuyo:
+
+- las clases Apex que implementan `IntegrationOperationHandler`
+- tu Named Credential y External Credential
+- tus registros de `IntegrationDefinition__mdt`
+
+Si construyes tu propio paquete, declara este como dependencia en lugar de copiarlo:
+
+```json
+"packageDirectories": [
+  {
+    "path": "force-app",
+    "default": true,
+    "dependencies": [
+      { "package": "sf-integration-framework@0.1.0-1" }
+    ]
+  }
+]
+```
+
+Para scratch orgs, instalar este paquete forma parte de preparar la org, no de desplegar tu código:
+
+```bash
+sf package install --package <id-de-version-04t> --target-org <alias-scratch> --wait 20
+```
+
+**No copies el código de este paquete en tu repositorio.** Los componentes se instalan como metadata ordinaria y editable, así que una copia en tu repositorio acabará desplegándose encima por tu propio pipeline y se desviará de la versión instalada. Terminarías manteniendo dos fuentes de verdad para las mismas clases.
+
+Si necesitas cambiar el framework, haz fork del repositorio, construye tu propia versión del paquete e instálala. Si solo quieres el código en local para leerlo, clona el repositorio en el tag correspondiente a tu versión instalada, o añade las clases a tu `.forceignore` para que tu pipeline no las despliegue nunca.
+
 ## Configurar una integración
 
 `IntegrationDefinition__mdt.DeveloperName` es la clave de integración que se usa desde Apex.

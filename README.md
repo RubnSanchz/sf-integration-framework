@@ -181,6 +181,41 @@ Then:
 4. Implement an Apex class that implements `IntegrationOperationHandler`.
 5. Schedule dispatcher/recovery jobs if you want automatic recovery and draining of pending work.
 
+
+### Using the package from your own repository
+
+Your repository does not contain this package's source. You install a version of it, the same way you would any other dependency.
+
+Your repository contains only what is yours:
+
+- the Apex classes that implement `IntegrationOperationHandler`
+- your Named Credential and External Credential
+- your `IntegrationDefinition__mdt` records
+
+If you build your own package, declare this one as a dependency instead of copying it:
+
+```json
+"packageDirectories": [
+  {
+    "path": "force-app",
+    "default": true,
+    "dependencies": [
+      { "package": "sf-integration-framework@0.1.0-1" }
+    ]
+  }
+]
+```
+
+For scratch orgs, installing this package is part of setting the org up, not part of deploying your code:
+
+```bash
+sf package install --package <04t-package-version-id> --target-org <scratch-alias> --wait 20
+```
+
+**Do not copy this package's source into your repository.** The components install as ordinary, editable metadata, so a copy in your repository will be deployed over them by your own pipeline and will drift from the installed version. You would end up maintaining two sources of truth for the same classes.
+
+If you need to change the framework itself, fork the repository, build your own package version and install that. If you only want the source locally to read it, clone the repository at the tag matching your installed version, or add the classes to your `.forceignore` so your pipeline never deploys them.
+
 ## Configure an integration
 
 `IntegrationDefinition__mdt.DeveloperName` is the integration key used from Apex.
