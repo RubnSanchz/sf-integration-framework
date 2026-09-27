@@ -6,3 +6,6 @@ coverage/
 *.log
 .DS_Store
 .env
+
+# Local working notes (plans, scratch files). Never committed.
+.local/
