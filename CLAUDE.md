@@ -51,39 +51,60 @@ Package versions need 75% org-wide Apex coverage to be promotable. The package a
 
 Transactional outbox for outbound HTTP. One `IntegrationTransaction__c` is one logical business operation with a stable, unique `IdempotencyKey__c`. One `IntegrationAttempt__c` is one physical execution attempt (audit only, never read back for retry decisions). Per-integration config comes from `IntegrationDefinition__mdt`, keyed by `DeveloperName` (the "integration key" passed from Apex).
 
+**Status and disposition are different questions.** `Status__c` records what happened (PENDING, PROCESSING, SUCCESS, ERROR, UNKNOWN). `Disposition__c` records what the system does next (NONE, RETRY, RECONCILE, MANUAL, TERMINAL). `PENDING` means only "never executed": a transaction never returns to it, and work that will run again says so through `Disposition__c = RETRY` whatever its status. That is what lets an uncertain outcome stay UNKNOWN while still being scheduled.
+
 Pipeline, where each arrow is a separate Apex transaction:
 
 ```
 IntegrationFramework.registerAndEnqueue(request)    caller's transaction: insert PENDING tx, enqueue claim job
-  -> IntegrationClaimJob (Queueable)                 SELECT ... FOR UPDATE; PENDING or due ERROR -> PROCESSING,
-                                                     AttemptCount++, set lease; chain execution job
+  -> IntegrationClaimJob (Queueable)                 SELECT ... FOR UPDATE; never-executed or due RETRY ->
+                                                     PROCESSING, AttemptCount++, set lease; chain execution
+                                                     job carrying the claimed attempt number
   -> IntegrationExecutionJob (Queueable + AllowsCallouts)
-       handler.buildRequest(tx) -> IntegrationHttpClient.send -> IntegrationAttemptService.record
-                                                                + IntegrationTransactionService.markSuccess/Error/Unknown
+       fence on (PROCESSING, expectedAttempt) -> config -> lease check -> handler.buildRequest(tx)
+       -> IntegrationHttpClient.send -> re-check the fence FOR UPDATE
+       -> IntegrationAttemptService.record + IntegrationTransactionService.mark*
 ```
+
+**Work is due** when `(Status__c = PENDING AND Disposition__c = NONE) OR (Disposition__c = RETRY AND (NextRetryAt__c = null OR NextRetryAt__c <= now))`. That predicate is duplicated in `IntegrationDispatchScheduler` and `IntegrationTransactionService.claim()` and the two must stay identical.
+
+**Fencing:** `IntegrationExecutionJob` takes the attempt number its claim reserved and only acts while `AttemptCount__c` still matches, checked once on entry and again `FOR UPDATE` after the callout. A worker that lost ownership mid-flight records its callout as an `UNKNOWN` / `SUPERSEDED` attempt carrying the real HTTP status and leaves the transaction to its new owner. Without this, a job still queued when its lease expired would send a second request for work someone else owns.
 
 **Why two Queueables:** DML followed by a callout in the same Apex transaction fails with "uncommitted work pending". The claim job does only DML; the execution job does the callout *first* and DML afterwards. That is also why `IntegrationOperationHandler.buildRequest()` must be read-only and why retries rebuild the request from Salesforce state instead of a persisted body.
 
-**Outcome classification** lives entirely in `IntegrationExecutionJob`:
+**Outcome classification** lives entirely in `IntegrationExecutionJob`. Everything above the rule failed before a request left the org, so the remote side cannot have acted: those are always ERROR, never UNKNOWN.
 
-| Situation | Attempt `Result__c` | Tx `Status__c` |
-| --- | --- | --- |
-| 2xx and `handleSuccess` OK | SUCCESS | SUCCESS |
-| 2xx but `handleSuccess` / `extractExternalId` throws | UNKNOWN | UNKNOWN (local DML rolled back to savepoint; remote side effect already happened) |
-| `CalloutException` (timeout, etc.) | UNKNOWN | UNKNOWN |
-| Retryable status AND `IdempotencyEnabled__c` AND `canRetry` | ERROR | ERROR with `NextRetryAt__c` |
-| Retryable status but idempotency disabled | UNKNOWN | UNKNOWN |
-| Any other non-2xx, or non-callout exception | ERROR | ERROR, no retry |
+| Situation | `ErrorCode__c` | Attempt `Result__c` | Tx `Status__c` | `Disposition__c` |
+| --- | --- | --- | --- | --- |
+| `IntegrationConfigService.get` throws | CONFIGURATION_ERROR | ERROR | ERROR | MANUAL |
+| handler class missing or not implementing the interface | HANDLER_ERROR | ERROR | ERROR | MANUAL |
+| `buildRequest` throws | REQUEST_BUILD_ERROR | ERROR | ERROR | MANUAL |
+| `buildRequest` returns null | INVALID_REQUEST | ERROR | ERROR | MANUAL |
+| `buildRequest` performed DML (rolled back, nothing sent) | HANDLER_DML | ERROR | ERROR | MANUAL |
+| lease already expired, so no callout is made | LEASE_EXPIRED | ERROR | ERROR | RETRY with date, or TERMINAL |
+| --- | --- | --- | --- | --- |
+| 2xx and `handleSuccess` OK | — | SUCCESS | SUCCESS | NONE |
+| 2xx but `handleSuccess` / `extractExternalId` throws | POST_PROCESSING_ERROR | UNKNOWN | UNKNOWN (local DML rolled back to savepoint; remote side effect already happened) | RECONCILE |
+| `CalloutException` (timeout, etc.) | CALLOUT_EXCEPTION | UNKNOWN | UNKNOWN | RECONCILE |
+| Retryable status AND `IdempotencyEnabled__c` AND `canRetry` | HTTP_nnn | ERROR | ERROR with `NextRetryAt__c` | RETRY |
+| Retryable status but idempotency disabled | HTTP_nnn | UNKNOWN | UNKNOWN | RECONCILE |
+| Retryable status, idempotent, but no retries left | RETRIES_EXHAUSTED | UNKNOWN | UNKNOWN | TERMINAL |
+| Any other non-2xx | HTTP_nnn | ERROR | ERROR | TERMINAL |
+| non-callout exception from the client | CLIENT_ERROR | ERROR | ERROR | MANUAL |
+| ownership lost while the callout was in flight | SUPERSEDED | UNKNOWN | *untouched* | *untouched* |
 
-`UNKNOWN` means "the remote side effect may have happened, do not blindly redo it". The framework only re-queues UNKNOWN or stale-lease work when `config.idempotencyEnabled && IntegrationRetryPolicy.canRetry(...)`. This gate appears in both `IntegrationExecutionJob` and `IntegrationRecoveryScheduler`; keep it intact in any change, it is the core safety property.
+`UNKNOWN` means "the remote side effect may have happened, do not blindly redo it". The framework only re-queues UNKNOWN or stale-lease work when `config.idempotencyEnabled && IntegrationRetryPolicy.canRetry(...)`. This gate appears in both `IntegrationExecutionJob` and `IntegrationRecoveryScheduler`; keep it intact in any change, it is the core safety property. The one exception is `LEASE_EXPIRED`, which is decided *before* the callout: nothing was sent, so retrying it needs no idempotency.
 
-**Schedulers** (customers schedule them via `System.schedule`, see README): `IntegrationDispatchScheduler` enqueues a claim job for each PENDING or due-retry ERROR record (max 40 per run). `IntegrationRecoveryScheduler` turns expired PROCESSING leases into a synthetic `STALE_LEASE` attempt and re-queues only safe UNKNOWNs.
+`RECONCILE` means "uncertain, not yet evaluated". `IntegrationRecoveryScheduler` is the evaluator and every run turns each one into RETRY or MANUAL, which is what keeps that window draining instead of filling with records nobody will requeue.
+
+**Schedulers** (customers schedule them via `System.schedule`, see README): `IntegrationDispatchScheduler` enqueues a claim job for each due record, per the predicate above (max 40 per run). `IntegrationRecoveryScheduler` handles only what had no normal ending: expired `PROCESSING` leases, which become a synthetic `STALE_LEASE` attempt plus an `UNKNOWN` transaction, and `UNKNOWN` + `RECONCILE` records. Both sweeps catch configuration errors per record, park that one as MANUAL and carry on.
 
 **Retry math** (`IntegrationRetryPolicy`): `MaxRetries__c` counts retries *after* the first attempt, so `canRetry` is `attemptCount <= maxRetries`. Backoff is `base * 2^(attempt-1)` with the exponent capped at 10.
 
 Other things worth knowing before editing:
 
-- `IntegrationConfigService.get()` owns all defaults (timeout 30000 ms, lease 60 s, 3 retries, 60 s base delay, 12000 payload chars, retryable codes 408/429/500/502/503/504, header `Idempotency-Key`). Change defaults there, not at call sites.
+- `IntegrationConfigService.get()` owns all defaults (timeout 30000 ms, lease 60 s, 3 retries, 60 s base delay, 12000 payload chars, retryable codes 408/429/500/502/503/504, header `Idempotency-Key`). Change defaults there, not at call sites. It also validates every definition and caches one `Config` per key per Apex transaction, so `get()` is cheap to call in a loop.
+- `IntegrationOperationHandler.buildRequest()` runs inside a savepoint with a DML counter. If it writes, the write is rolled back and the attempt is refused as `HANDLER_DML` without calling out, because that DML would otherwise turn the callout into an "uncommitted work pending" failure that reads exactly like an uncertain remote call.
 - `IntegrationHttpClient` builds the endpoint as `callout:<NamedCredential__c>` + path, silently drops `Authorization` / `Proxy-Authorization` / `Host` headers supplied by handlers, and sets the idempotency header only when idempotency is enabled.
 - Bodies are persisted only when `LogRequestBody__c` / `LogResponseBody__c` are true, always through `IntegrationSanitizer.sanitize` (regex redaction of token/password keys, then truncation). Headers are never persisted.
 - Handlers are resolved reflectively with `Type.forName(HandlerClass__c)` in `IntegrationHandlerFactory`; the package ships no concrete handler.

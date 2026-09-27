@@ -38,7 +38,8 @@ Transacción de negocio
 ## Capacidades principales
 
 - Clave de operación/idempotencia estable entre reintentos.
-- Ciclo de vida `PENDING`, `PROCESSING`, `SUCCESS`, `ERROR` y `UNKNOWN`.
+- Ciclo de vida `PENDING`, `PROCESSING`, `SUCCESS`, `ERROR` y `UNKNOWN`, con `Disposition__c` registrando por separado qué pasa a continuación.
+- Fencing por número de intento: un worker con el lease expirado no puede enviar una segunda petición de un trabajo que ya es de otro.
 - Claim pesimista mediante `FOR UPDATE`.
 - Leases de procesamiento para detectar jobs asíncronos abandonados.
 - Queueables separados para claim/DML y ejecución HTTP, evitando errores de callout por trabajo sin confirmar (uncommitted work).
@@ -270,7 +271,21 @@ System.schedule(
 );
 ```
 
-El dispatcher drena el trabajo `PENDING` y los reintentos vencidos. La recuperación identifica leases de procesamiento expirados y solo reencola automáticamente el trabajo incierto cuando la idempotencia remota está configurada.
+El dispatcher recoge el trabajo que nunca se ha ejecutado y aquel cuyo `Disposition__c` es `RETRY` con `NextRetryAt__c` vencido. La recuperación se ocupa solo de lo que nunca llegó a un final normal: leases de procesamiento expirados y resultados inciertos pendientes de evaluar. Solo reencola automáticamente el trabajo incierto cuando la idempotencia remota está configurada.
+
+### Leer y dirigir una transacción
+
+`Status__c` dice qué ocurrió. `Disposition__c` dice qué hará el framework a continuación:
+
+| `Disposition__c` | Qué significa | Qué hace un administrador |
+| --- | --- | --- |
+| `NONE` | Nunca se ejecutó, o terminó con éxito. | Nada. |
+| `RETRY` | Se volverá a enviar cuando venza `NextRetryAt__c`. | Nada, salvo que lo quieras antes: borra la fecha. |
+| `RECONCILE` | El resultado es incierto y aún no se ha evaluado. La siguiente pasada de recuperación lo convierte en `RETRY` o en `MANUAL`. | Esperar a la siguiente pasada de recuperación. |
+| `MANUAL` | Nada automático va a resolverlo. Normalmente una definición rota, un handler que no puede construir su petición, o un resultado incierto sobre una API no idempotente. | Comprobar el sistema remoto, corregir la causa y poner `RETRY` para reencolar o `TERMINAL` para cerrarla. |
+| `TERMINAL` | Terminó sin éxito y no queda nada que intentar. | Nada, o `RETRY` para forzar otro intento. |
+
+Para reencolar a mano una transacción aparcada, pon `Disposition__c` a `RETRY`. Deja `NextRetryAt__c` vacío para que se despache en la siguiente pasada, o ponle fecha para retrasarla. No hace falta tocar nada más: `Status__c` sigue registrando lo que de verdad ocurrió.
 
 ## Seguridad
 

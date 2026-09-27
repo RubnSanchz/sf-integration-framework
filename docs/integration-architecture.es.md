@@ -28,11 +28,13 @@ Esto permite que el logging de payloads siga siendo opcional sin hacer imposible
 
 ## Máquina de estados
 
+Dos campos responden a dos preguntas distintas. `Status__c` dice qué ocurrió. `Disposition__c` dice qué hace el framework a continuación.
+
 ```text
                   +----------+
-                  | PENDING  |
+                  | PENDING  |   Disposition NONE: nunca ejecutada
                   +----+-----+
-                       | claim
+                       | claim (AttemptCount++, lease, número de intento entregado al worker)
                        v
                  +-----------+
                  |PROCESSING |
@@ -42,21 +44,57 @@ Esto permite que el logging de payloads siga siendo opcional sin hacer imposible
         |              |              |
         v              v              v
     SUCCESS          ERROR         UNKNOWN
+    NONE           RETRY | TERMINAL | MANUAL
+                                  RETRY | RECONCILE | TERMINAL | MANUAL
                        |              |
-                       | reintento    | recuperación
-                       | vencido      | idempotente
-                       +-------> PENDING <------+
+                       +---- Disposition RETRY y NextRetryAt vencido ----+
+                                      |
+                                      v
+                               se vuelve a reclamar
 ```
 
-`ERROR` significa que Salesforce recibió información suficiente para clasificar un fallo. Un valor en `NextRetryAt__c` significa que el framework lo considera candidato a reintento.
+Una transacción nunca vuelve a `PENDING`. `PENDING` significa "nunca ejecutada", y todo lo que el framework pretende volver a ejecutar lo dice mediante `Disposition__c = RETRY` más un `NextRetryAt__c`, sea cual sea su estado. Eso es lo que permite que un resultado incierto siga siendo `UNKNOWN` y esté programado a la vez, en vez de reescribirlo como `PENDING` y perder esa información.
+
+Hay trabajo pendiente cuando:
+
+```text
+(Status__c = PENDING AND Disposition__c = NONE)
+OR (Disposition__c = RETRY AND (NextRetryAt__c = null OR NextRetryAt__c <= now))
+```
+
+`ERROR` significa que Salesforce recibió información suficiente para clasificar un fallo.
 
 `UNKNOWN` significa que Salesforce no puede inferir con seguridad si el efecto secundario remoto ocurrió. El reintento automático solo se habilita cuando la definición de integración indica explícitamente que la API remota es idempotente.
 
-## Leases y trabajo obsoleto
+Las disposiciones:
 
-Una transacción reclamada (claimed) recibe `ProcessingStartedAt__c` y `LeaseExpiresAt__c`. La recuperación considera obsoleta una transacción `PROCESSING` con el lease expirado.
+| Valor | Significado |
+| --- | --- |
+| `NONE` | Nada que hacer por parte del framework: o nunca se ejecutó, o terminó con éxito. |
+| `RETRY` | Se volverá a enviar cuando venza `NextRetryAt__c`. Sin fecha significa "en cuanto se pueda". |
+| `RECONCILE` | El resultado es incierto y aún no se ha evaluado. El scheduler de recuperación lo evalúa en su siguiente pasada y lo convierte en `RETRY` o en `MANUAL`. |
+| `MANUAL` | Nada automático va a resolverlo. Necesita a un administrador. |
+| `TERMINAL` | Terminó sin éxito y no queda nada que intentar. |
 
-Para el trabajo obsoleto, el scheduler de recuperación escribe un `IntegrationAttempt__c` sintético con resultado `UNKNOWN`. Devuelve el trabajo a `PENDING` solo cuando el reintento está habilitado, la idempotencia remota está habilitada y el presupuesto de reintentos no se ha agotado.
+Un administrador vuelve a encolar una transacción aparcada poniendo `Disposition__c` a `RETRY`, con fecha para retrasarla o sin fecha para que se despache en la siguiente pasada.
+
+## Fallos previos al callout
+
+Todo lo que puede fallar entre reclamar una transacción y enviar la petición se clasifica como `ERROR`, nunca como `UNKNOWN`: ninguna petición salió de la org, así que el lado remoto no ha podido actuar. Cada causa tiene su propio código, porque se resuelven de forma distinta: `CONFIGURATION_ERROR`, `HANDLER_ERROR`, `REQUEST_BUILD_ERROR`, `INVALID_REQUEST` y `HANDLER_DML`.
+
+`buildRequest()` se ejecuta dentro de un savepoint con un contador de DML. Si escribe algo, la escritura se deshace y el intento se rechaza como `HANDLER_DML` sin hacer el callout. Ese DML haría que el callout siguiente fallara con "uncommitted work pending", que en tiempo de ejecución es indistinguible de una llamada remota genuinamente incierta.
+
+## Leases, fencing y trabajo obsoleto
+
+Una transacción reclamada (claimed) recibe `ProcessingStartedAt__c` y `LeaseExpiresAt__c`, y al worker se le entrega el número de intento que reservó su claim.
+
+Ese número es el fence. El job de ejecución solo actúa mientras el `AttemptCount__c` almacenado siga coincidiendo, comprobado al entrar y otra vez con `FOR UPDATE` después del callout. Tres desenlaces:
+
+- Número de intento distinto al entrar: el worker se retira en silencio, sin escribir ni enviar nada.
+- Lease ya expirado al entrar: no se hace el callout. Como no se envió nada no hay efecto remoto, así que este reintento no exige idempotencia remota. El intento se registra como `LEASE_EXPIRED`.
+- Pérdida de propiedad con el callout en vuelo: la respuesta se registra como un intento `UNKNOWN` / `SUPERSEDED` con el código HTTP real, y la transacción se deja intacta para quien la posea ahora.
+
+La recuperación considera obsoleta una transacción `PROCESSING` con el lease expirado. Escribe un `IntegrationAttempt__c` sintético con resultado `UNKNOWN` y código `STALE_LEASE`, y mueve la transacción a `UNKNOWN` con `RETRY` y una fecha de backoff solo cuando el reintento está habilitado, la idempotencia remota está habilitada y el presupuesto de reintentos no se ha agotado. Si no, pasa a `RECONCILE`, y de ahí a `MANUAL` en cuanto el scheduler de recuperación confirma que nada automático puede resolverlo.
 
 ## Política de reintentos
 
