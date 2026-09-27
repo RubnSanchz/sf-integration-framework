@@ -48,9 +48,18 @@ public class IntegrationExecutionJobTest {
         public String body = '{"id":"EXT-1"}';
         public Boolean failWithCalloutException = false;
         public Integer calls = 0;
+        // Simulates another worker reclaiming the transaction while this
+        // callout is in flight.
+        public Id stealTransactionId;
 
         public HttpResponse respond(HttpRequest request) {
             calls++;
+            if (stealTransactionId != null) {
+                update new IntegrationTransaction__c(
+                    Id = stealTransactionId,
+                    AttemptCount__c = 99
+                );
+            }
             if (failWithCalloutException) {
                 throw new CalloutException('Read timed out');
             }
@@ -121,9 +130,9 @@ public class IntegrationExecutionJobTest {
         ];
     }
 
-    private static void run(Id transactionId) {
+    private static void run(Id transactionId, Integer expectedAttempt) {
         Test.startTest();
-        System.enqueueJob(new IntegrationExecutionJob(transactionId));
+        System.enqueueJob(new IntegrationExecutionJob(transactionId, expectedAttempt));
         Test.stopTest();
     }
 
@@ -134,7 +143,7 @@ public class IntegrationExecutionJobTest {
         // No test config registered for this key, so get() throws.
         IntegrationTransaction__c stale = processing('exec-config-001', 1);
 
-        run(stale.Id);
+        run(stale.Id, 1);
 
         IntegrationTransaction__c stored = reload(stale.Id);
         System.assertEquals(IntegrationConstants.STATUS_ERROR, stored.Status__c);
@@ -152,7 +161,7 @@ public class IntegrationExecutionJobTest {
         configure(true, 'NoSuchHandlerClass');
         IntegrationTransaction__c stale = processing('exec-handler-001', 1);
 
-        run(stale.Id);
+        run(stale.Id, 1);
 
         IntegrationTransaction__c stored = reload(stale.Id);
         System.assertEquals(IntegrationConstants.STATUS_ERROR, stored.Status__c);
@@ -170,7 +179,7 @@ public class IntegrationExecutionJobTest {
         handlerMode = MODE_THROW_ON_BUILD;
         IntegrationTransaction__c stale = processing('exec-build-001', 1);
 
-        run(stale.Id);
+        run(stale.Id, 1);
 
         IntegrationTransaction__c stored = reload(stale.Id);
         System.assertEquals(IntegrationConstants.STATUS_ERROR, stored.Status__c);
@@ -187,7 +196,7 @@ public class IntegrationExecutionJobTest {
         handlerMode = MODE_NULL_REQUEST;
         IntegrationTransaction__c stale = processing('exec-null-001', 1);
 
-        run(stale.Id);
+        run(stale.Id, 1);
 
         IntegrationTransaction__c stored = reload(stale.Id);
         System.assertEquals(IntegrationConstants.STATUS_ERROR, stored.Status__c);
@@ -204,7 +213,7 @@ public class IntegrationExecutionJobTest {
         handlerMode = MODE_DML_ON_BUILD;
         IntegrationTransaction__c stale = processing('exec-dml-001', 1);
 
-        run(stale.Id);
+        run(stale.Id, 1);
 
         IntegrationTransaction__c stored = reload(stale.Id);
         System.assertEquals(IntegrationConstants.STATUS_ERROR, stored.Status__c);
@@ -226,7 +235,7 @@ public class IntegrationExecutionJobTest {
         handlerMode = MODE_NORMAL;
         IntegrationTransaction__c stale = processing('exec-ok-001', 1);
 
-        run(stale.Id);
+        run(stale.Id, 1);
 
         IntegrationTransaction__c stored = reload(stale.Id);
         System.assertEquals(IntegrationConstants.STATUS_SUCCESS, stored.Status__c);
@@ -244,7 +253,7 @@ public class IntegrationExecutionJobTest {
         handlerMode = MODE_THROW_ON_SUCCESS;
         IntegrationTransaction__c stale = processing('exec-post-001', 1);
 
-        run(stale.Id);
+        run(stale.Id, 1);
 
         IntegrationTransaction__c stored = reload(stale.Id);
         System.assertEquals(
@@ -266,7 +275,7 @@ public class IntegrationExecutionJobTest {
         handlerMode = MODE_NORMAL;
         IntegrationTransaction__c stale = processing('exec-timeout-001', 1);
 
-        run(stale.Id);
+        run(stale.Id, 1);
 
         IntegrationTransaction__c stored = reload(stale.Id);
         System.assertEquals(IntegrationConstants.STATUS_UNKNOWN, stored.Status__c);
@@ -283,7 +292,7 @@ public class IntegrationExecutionJobTest {
         handlerMode = MODE_NORMAL;
         IntegrationTransaction__c stale = processing('exec-503-001', 1);
 
-        run(stale.Id);
+        run(stale.Id, 1);
 
         IntegrationTransaction__c stored = reload(stale.Id);
         System.assertEquals(IntegrationConstants.STATUS_ERROR, stored.Status__c);
@@ -301,7 +310,7 @@ public class IntegrationExecutionJobTest {
         handlerMode = MODE_NORMAL;
         IntegrationTransaction__c stale = processing('exec-503-002', 1);
 
-        run(stale.Id);
+        run(stale.Id, 1);
 
         IntegrationTransaction__c stored = reload(stale.Id);
         System.assertEquals(IntegrationConstants.STATUS_UNKNOWN, stored.Status__c);
@@ -320,7 +329,7 @@ public class IntegrationExecutionJobTest {
         // fifth attempt has none left.
         IntegrationTransaction__c stale = processing('exec-503-003', 5);
 
-        run(stale.Id);
+        run(stale.Id, 5);
 
         IntegrationTransaction__c stored = reload(stale.Id);
         System.assertEquals(IntegrationConstants.STATUS_UNKNOWN, stored.Status__c);
@@ -338,7 +347,7 @@ public class IntegrationExecutionJobTest {
         handlerMode = MODE_NORMAL;
         IntegrationTransaction__c stale = processing('exec-422-001', 1);
 
-        run(stale.Id);
+        run(stale.Id, 1);
 
         IntegrationTransaction__c stored = reload(stale.Id);
         System.assertEquals(IntegrationConstants.STATUS_ERROR, stored.Status__c);
@@ -364,5 +373,105 @@ public class IntegrationExecutionJobTest {
         );
         System.assertEquals(IntegrationConstants.DISPOSITION_MANUAL, stored.Disposition__c);
         System.assertEquals(IntegrationConstants.ERROR_CONFIGURATION, stored.ErrorCode__c);
+    }
+    @IsTest
+    static void workerWithAStaleAttemptNumberStandsDown() {
+        Mock mock = new Mock();
+        Test.setMock(HttpCalloutMock.class, mock);
+        configure(true, 'IntegrationExecutionJobTest.TestHandler');
+        handlerMode = MODE_NORMAL;
+        IntegrationTransaction__c stale = processing('exec-fence-001', 3);
+
+        // The claim that produced this job was for attempt 2; something has
+        // reclaimed the transaction since.
+        run(stale.Id, 2);
+
+        IntegrationTransaction__c stored = reload(stale.Id);
+        System.assertEquals(
+            IntegrationConstants.STATUS_PROCESSING,
+            stored.Status__c,
+            'A superseded worker must leave the transaction exactly as it found it.'
+        );
+        System.assertEquals(0, mock.calls, 'It must not call out either.');
+        System.assertEquals(0, attemptsOf(stale.Id).size());
+    }
+
+    @IsTest
+    static void expiredLeaseIsRescheduledWithoutCallingOut() {
+        Mock mock = new Mock();
+        Test.setMock(HttpCalloutMock.class, mock);
+        configure(true, 'IntegrationExecutionJobTest.TestHandler');
+        handlerMode = MODE_NORMAL;
+        IntegrationTransaction__c stale = processing('exec-lease-001', 1);
+        stale.LeaseExpiresAt__c = System.now().addSeconds(-1);
+        update stale;
+
+        run(stale.Id, 1);
+
+        IntegrationTransaction__c stored = reload(stale.Id);
+        System.assertEquals(IntegrationConstants.STATUS_ERROR, stored.Status__c);
+        System.assertEquals(
+            IntegrationConstants.DISPOSITION_RETRY,
+            stored.Disposition__c,
+            'Nothing was sent, so this retry does not need remote idempotency.'
+        );
+        System.assertEquals(IntegrationConstants.ERROR_LEASE_EXPIRED, stored.ErrorCode__c);
+        System.assertNotEquals(null, stored.NextRetryAt__c);
+        System.assertEquals(0, mock.calls, 'An expired lease must never call out.');
+        System.assertEquals(
+            IntegrationConstants.ERROR_LEASE_EXPIRED,
+            attemptsOf(stale.Id)[0].ErrorCode__c
+        );
+    }
+
+    @IsTest
+    static void expiredLeaseWithNoRetriesLeftIsTerminal() {
+        Mock mock = new Mock();
+        Test.setMock(HttpCalloutMock.class, mock);
+        configure(true, 'IntegrationExecutionJobTest.TestHandler');
+        handlerMode = MODE_NORMAL;
+        IntegrationTransaction__c stale = processing('exec-lease-002', 5);
+        stale.LeaseExpiresAt__c = System.now().addSeconds(-1);
+        update stale;
+
+        run(stale.Id, 5);
+
+        IntegrationTransaction__c stored = reload(stale.Id);
+        System.assertEquals(IntegrationConstants.STATUS_ERROR, stored.Status__c);
+        System.assertEquals(IntegrationConstants.DISPOSITION_TERMINAL, stored.Disposition__c);
+        System.assertEquals(null, stored.NextRetryAt__c);
+        System.assertEquals(0, mock.calls);
+    }
+
+    @IsTest
+    static void supersededWorkerRecordsItsCalloutWithoutTouchingTheTransaction() {
+        Mock mock = new Mock();
+        Test.setMock(HttpCalloutMock.class, mock);
+        configure(true, 'IntegrationExecutionJobTest.TestHandler');
+        handlerMode = MODE_NORMAL;
+        IntegrationTransaction__c stale = processing('exec-superseded-001', 1);
+        mock.stealTransactionId = stale.Id;
+
+        run(stale.Id, 1);
+
+        IntegrationTransaction__c stored = [
+            SELECT Status__c, Disposition__c, AttemptCount__c, ExternalId__c
+            FROM IntegrationTransaction__c
+            WHERE Id = :stale.Id
+        ];
+        System.assertEquals(1, mock.calls, 'The callout did happen.');
+        System.assertEquals(
+            IntegrationConstants.STATUS_PROCESSING,
+            stored.Status__c,
+            'The transaction now belongs to another worker and must not be written.'
+        );
+        System.assertEquals(99, stored.AttemptCount__c);
+        System.assertEquals(null, stored.ExternalId__c);
+
+        List<IntegrationAttempt__c> attempts = attemptsOf(stale.Id);
+        System.assertEquals(1, attempts.size(), 'The callout must not be lost.');
+        System.assertEquals(IntegrationConstants.RESULT_UNKNOWN, attempts[0].Result__c);
+        System.assertEquals(IntegrationConstants.ERROR_SUPERSEDED, attempts[0].ErrorCode__c);
+        System.assertEquals(200, attempts[0].HttpStatusCode__c, 'With the real status code.');
     }
 }

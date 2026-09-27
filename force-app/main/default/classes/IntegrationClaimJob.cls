@@ -46,7 +46,12 @@ public class IntegrationClaimJob implements Queueable {
         }
 
         if (claimed != null) {
-            System.enqueueJob(new IntegrationExecutionJob(claimed.Id));
+            // The attempt number fences the worker: if anything reclaims this
+            // transaction before the job runs, it will find a different number
+            // and stand down.
+            System.enqueueJob(
+                new IntegrationExecutionJob(claimed.Id, claimed.AttemptCount__c.intValue())
+            );
         }
     }
 }

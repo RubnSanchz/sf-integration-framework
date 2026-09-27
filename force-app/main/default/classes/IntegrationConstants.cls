@@ -26,6 +26,10 @@ public class IntegrationConstants {
     public static final String ERROR_INVALID_REQUEST = 'INVALID_REQUEST';
     public static final String ERROR_HANDLER_DML = 'HANDLER_DML';
     public static final String ERROR_CLAIM = 'CLAIM_ERROR';
+    public static final String ERROR_LEASE_EXPIRED = 'LEASE_EXPIRED';
+
+    // Recorded on the attempt of a worker that lost ownership of its transaction.
+    public static final String ERROR_SUPERSEDED = 'SUPERSEDED';
 
     // From the callout onwards the remote side effect is uncertain.
     public static final String ERROR_CALLOUT_EXCEPTION = 'CALLOUT_EXCEPTION';
