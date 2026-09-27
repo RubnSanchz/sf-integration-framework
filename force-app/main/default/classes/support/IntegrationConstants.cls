@@ -1,17 +1,6 @@
 /**
- * Every literal the framework shares, as public static final fields. That is
- * the conventional Apex form for constants and the reason to prefer it here is
- * that these values mirror restricted picklists: final is what stops one of
- * them being reassigned at runtime and drifting from the metadata.
- *
- * Grouped by family with comments rather than split across classes, because
- * Apex has no way to namespace them inside one file: an inner class cannot
- * hold static members ("static can only be used on fields of a top level
- * type"). Splitting would mean several top-level classes, which buys nothing
- * at the call sites.
- *
- * IntegrationCoreTest pins every literal and checks the three families that
- * mirror a picklist still match it.
+ * Shared literals. The status, result and disposition values mirror restricted
+ * picklists, so they must stay in step with the metadata and must stay final.
  */
 public class IntegrationConstants {
     public static final String STATUS_PENDING = 'PENDING';
@@ -20,9 +9,7 @@ public class IntegrationConstants {
     public static final String STATUS_ERROR = 'ERROR';
     public static final String STATUS_UNKNOWN = 'UNKNOWN';
 
-    // Disposition__c answers "what does the system do now", separately from
-    // Status__c ("what happened"). Every value must exist in the restricted
-    // picklist on IntegrationTransaction__c.Disposition__c.
+    // What the system does next, as opposed to Status__c, which is what happened.
     public static final String DISPOSITION_NONE = 'NONE';
     public static final String DISPOSITION_RETRY = 'RETRY';
     public static final String DISPOSITION_RECONCILE = 'RECONCILE';
@@ -33,26 +20,22 @@ public class IntegrationConstants {
     public static final String RESULT_ERROR = 'ERROR';
     public static final String RESULT_UNKNOWN = 'UNKNOWN';
 
-    // Error codes. The first block is everything that can go wrong before a
-    // request leaves the org, where we know the remote side has not acted.
+    // Error codes, split by the only question that matters for recovery:
+    // did anything leave the org? Here, no. These are always ERROR.
     public static final String ERROR_CONFIGURATION = 'CONFIGURATION_ERROR';
     public static final String ERROR_HANDLER = 'HANDLER_ERROR';
     public static final String ERROR_REQUEST_BUILD = 'REQUEST_BUILD_ERROR';
     public static final String ERROR_INVALID_REQUEST = 'INVALID_REQUEST';
     public static final String ERROR_HANDLER_DML = 'HANDLER_DML';
+    public static final String ERROR_CLIENT = 'CLIENT_ERROR';
     public static final String ERROR_CLAIM = 'CLAIM_ERROR';
     public static final String ERROR_LEASE_EXPIRED = 'LEASE_EXPIRED';
 
-    // Recorded on the attempt of a worker that lost ownership of its transaction.
-    public static final String ERROR_SUPERSEDED = 'SUPERSEDED';
-
-    // Recorded by the recovery scheduler on a lease that ran out with no result.
-    public static final String ERROR_STALE_LEASE = 'STALE_LEASE';
-
-    // From the callout onwards the remote side effect is uncertain.
+    // Here the remote side may have acted. These are UNKNOWN.
     public static final String ERROR_CALLOUT_EXCEPTION = 'CALLOUT_EXCEPTION';
-    public static final String ERROR_CLIENT = 'CLIENT_ERROR';
     public static final String ERROR_POST_PROCESSING = 'POST_PROCESSING_ERROR';
+    public static final String ERROR_SUPERSEDED = 'SUPERSEDED';
+    public static final String ERROR_STALE_LEASE = 'STALE_LEASE';
     public static final String ERROR_RETRIES_EXHAUSTED = 'RETRIES_EXHAUSTED';
 
     private IntegrationConstants() {}
