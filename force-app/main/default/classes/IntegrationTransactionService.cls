@@ -71,7 +71,7 @@ public inherited sharing class IntegrationTransactionService {
             LeaseExpiresAt__c = null,
             NextRetryAt__c = nextRetryAt,
             ErrorCode__c = code,
-            ErrorMessage__c = message
+            ErrorMessage__c = IntegrationSanitizer.sanitize(message, null)
         );
     }
 
@@ -82,7 +82,7 @@ public inherited sharing class IntegrationTransactionService {
             LeaseExpiresAt__c = null,
             NextRetryAt__c = null,
             ErrorCode__c = code,
-            ErrorMessage__c = message
+            ErrorMessage__c = IntegrationSanitizer.sanitize(message, null)
         );
     }
 
