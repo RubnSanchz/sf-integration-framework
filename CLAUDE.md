@@ -62,7 +62,7 @@ Package versions need 75% org-wide Apex coverage to be promotable. The package a
 - `IntegrationAttempt__c` is a master-detail child, so its `sharingModel` must stay `ControlledByParent`.
 - Every `.cls` needs a sibling `.cls-meta.xml` (apiVersion 67.0, status Active).
 - The string constants in `IntegrationConstants` must match the restricted picklists on `IntegrationTransaction__c.Status__c`, `IntegrationTransaction__c.Disposition__c` and `IntegrationAttempt__c.Result__c`. `constantsMatchTheRestrictedPicklists` enforces it.
-- Those constants are **getter-only properties, not `public static final` fields, on purpose**: reading one static field initialises every static in the class, so a flat constant list surfaces values nobody asked for while debugging. Do not "fix" them back, and never add a setter: a settable constant could drift from the picklist it mirrors. `constantValuesArePinned` pins every literal.
+- They are `public static final` fields, the conventional Apex form, and `final` is load-bearing: it is what stops a value that mirrors a restricted picklist being reassigned at runtime. Grouping them by family inside one class is deliberate — an Apex inner class cannot hold static members ("static can only be used on fields of a top level type"), so the only alternative is several top-level classes. `constantValuesArePinned` pins every literal.
 - Named Credentials are deliberately **not** packaged; never add environment-specific credential metadata to `force-app`.
 
 ## Architecture
