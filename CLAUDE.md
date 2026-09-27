@@ -8,6 +8,23 @@ Salesforce DX project (Apex + custom objects, API 67.0, no namespace) meant to s
 
 English documentation is canonical. `README.es.md` and `docs/*.es.md` are Spanish translations with no extra content: do not read them unless the task is about translations. When you edit an English doc, update its `.es.md` counterpart in the same change or tell the user it needs re-syncing. Each pair carries a `[English](x.md) | [Español](x.es.md)` bar as its first line. `CLAUDE.md` files are not translated.
 
+## Apex layout
+
+Classes are grouped in subfolders under `force-app/main/default/classes/`:
+
+| Folder | What lives there |
+| --- | --- |
+| `api/` | What a consumer touches: `IntegrationFramework`, `IntegrationRequest`, `IntegrationResponse`, `IntegrationOperationHandler` |
+| `pipeline/` | The async machinery: the two Queueables and the two Schedulables |
+| `services/` | DML owners, all `inherited sharing`: transaction, attempt and config services |
+| `policy/` | Pure decision logic, no DML: `IntegrationRetryPolicy` |
+| `support/` | `IntegrationHttpClient`, `IntegrationSanitizer`, `IntegrationHandlerFactory`, `IntegrationConstants` |
+| `tests/` | Test classes |
+
+**The folders are a repository convention only.** Apex has no concept of folders: the metadata API flattens everything into `classes/`, so the layout never reaches an org and a subscriber who retrieves the installed package gets a flat `classes/` directory. Moving a class between these folders is not a metadata change and needs no manifest edit — `manifest/package.xml` lists member names, not paths.
+
+Two things do depend on the paths: `--source-dir` arguments must include the subfolder, and `sf project retrieve start` into this project keeps each file where it already is (verified). A blanket retrieve is not content-neutral, though: it strips the trailing newline from every class and rewrites the permission set from the org's own copy, so prefer deploying over retrieving here.
+
 ## Commands
 
 Every command needs an authenticated org. Scratch org bootstrap:
@@ -21,7 +38,7 @@ Deploy and test against it:
 
 ```bash
 sf project deploy start --target-org sif-scratch                                   # all source
-sf project deploy start --target-org sif-scratch --source-dir force-app/main/default/classes/IntegrationHttpClient.cls
+sf project deploy start --target-org sif-scratch --source-dir force-app/main/default/classes/support/IntegrationHttpClient.cls
 sf apex run test --target-org sif-scratch --test-level RunLocalTests --wait 20
 sf apex run test --target-org sif-scratch --class-names IntegrationCoreTest --code-coverage --wait 10
 sf apex run test --target-org sif-scratch --tests IntegrationCoreTest.sanitizerRedactsSecretsAndTruncatesPayloads --wait 10
