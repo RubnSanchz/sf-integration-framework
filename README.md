@@ -36,7 +36,8 @@ Business transaction
 ## Main capabilities
 
 - Stable operation/idempotency key across retries.
-- `PENDING`, `PROCESSING`, `SUCCESS`, `ERROR` and `UNKNOWN` lifecycle.
+- `PENDING`, `PROCESSING`, `SUCCESS`, `ERROR` and `UNKNOWN` lifecycle, with `Disposition__c` recording separately what happens next.
+- Attempt-number fencing, so a worker whose lease expired cannot send a second request for work another worker now owns.
 - Pessimistic claim using `FOR UPDATE`.
 - Processing leases to detect abandoned async jobs.
 - Separate Queueables for claim/DML and HTTP execution to avoid uncommitted-work callout errors.
@@ -268,7 +269,21 @@ System.schedule(
 );
 ```
 
-The dispatcher drains `PENDING` and due retry work. Recovery identifies expired processing leases and only auto-requeues uncertain work when remote idempotency is configured.
+The dispatcher picks up work that has never executed and work whose `Disposition__c` is `RETRY` with a due `NextRetryAt__c`. Recovery handles only what never reached a normal ending: expired processing leases, and uncertain outcomes awaiting evaluation. It only auto-requeues uncertain work when remote idempotency is configured.
+
+### Reading and steering a transaction
+
+`Status__c` says what happened. `Disposition__c` says what the framework will do next:
+
+| `Disposition__c` | What it means | What an administrator does |
+| --- | --- | --- |
+| `NONE` | Never executed, or finished successfully. | Nothing. |
+| `RETRY` | It will be sent again when `NextRetryAt__c` is due. | Nothing, unless you want it sooner: clear the date. |
+| `RECONCILE` | The outcome is uncertain and has not been evaluated yet. The next recovery run turns it into `RETRY` or `MANUAL`. | Wait for the next recovery run. |
+| `MANUAL` | Nothing automatic will resolve it. Typically a broken definition, a handler that cannot build its request, or an uncertain outcome on a non-idempotent API. | Check the remote system, fix the cause, then set `RETRY` to requeue or `TERMINAL` to close it. |
+| `TERMINAL` | Finished without success and there is nothing left to try. | Nothing, or `RETRY` to force another attempt. |
+
+To requeue a parked transaction by hand, set `Disposition__c` to `RETRY`. Leave `NextRetryAt__c` empty to have it dispatched on the next run, or set a date to delay it. Nothing else has to change: `Status__c` keeps recording what actually happened.
 
 ## Security
 
