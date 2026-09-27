@@ -55,6 +55,12 @@ Transacción de negocio
 ```text
 force-app/main/default/
 |-- classes/
+|   |-- api/          superficie que toca el consumidor
+|   |-- pipeline/     queueables y schedulables
+|   |-- services/     las clases que hacen el DML
+|   |-- policy/       lógica de decisión pura, sin DML
+|   |-- support/      cliente http, sanitizer, factoría, constantes
+|   `-- tests/
 |-- objects/
 |   |-- IntegrationTransaction__c/
 |   |-- IntegrationAttempt__c/
@@ -171,7 +177,7 @@ sf package install \
 
 Después:
 
-1. Asigna `SF Integration Framework Admin` a los administradores que necesiten inspeccionar o gestionar los registros del framework.
+1. Asigna `SF Integration Framework Admin` a los administradores que necesiten inspeccionar o gestionar los registros del framework **y a cualquier usuario cuyas transacciones registren trabajo de integración**. Registrar inserta un `IntegrationTransaction__c`, que falla con "fields being inaccessible" si el usuario en ejecución no tiene acceso a los campos.
 2. Configura la Named Credential y la External Credential de la org de destino.
 3. Crea un registro `IntegrationDefinition__mdt` por cada integración.
 4. Implementa una clase Apex que implemente `IntegrationOperationHandler`.
@@ -194,7 +200,16 @@ Campos importantes:
 | `RetryableStatusCodes__c` | Códigos HTTP separados por comas; por defecto `408,429,500,502,503,504` |
 | `IdempotencyEnabled__c` | Si el sistema remoto garantiza un procesamiento seguro frente a duplicados para la clave configurada |
 | `IdempotencyHeader__c` | Nombre de la cabecera, por defecto `Idempotency-Key` |
+| `RetryEnabled__c` | Interruptor general de reintentos para esta integración |
+| `MaxPayloadChars__c` | Los payloads persistidos se truncan a esta longitud |
 | `LogRequestBody__c` / `LogResponseBody__c` | Persistencia de payloads mediante opt-in explícito |
+
+La definición se valida la primera vez que se lee, y una inválida hace fallar la
+transacción a la que pertenece en vez de comportarse mal más adelante. Las reglas:
+`TimeoutMs__c` entre 1 y 120000; `ProcessingLeaseSeconds__c` al menos el timeout
+más 30 segundos, porque un lease más corto que su propio callout permite que la
+recuperación reclame trabajo que sigue en marcha; `MaxPayloadChars__c` entre 1 y
+32768; `MaxRetries__c` no negativo; `RetryBaseDelaySeconds__c` al menos 1.
 
 **No** habilites `IdempotencyEnabled__c` solo porque Salesforce genere una clave. La API remota debe consumir y aplicar realmente esa clave.
 

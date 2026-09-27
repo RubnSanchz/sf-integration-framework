@@ -53,6 +53,12 @@ Business transaction
 ```text
 force-app/main/default/
 |-- classes/
+|   |-- api/          consumer-facing surface
+|   |-- pipeline/     queueables and schedulables
+|   |-- services/     the classes that own the DML
+|   |-- policy/       pure decision logic, no DML
+|   |-- support/      http client, sanitizer, factory, constants
+|   `-- tests/
 |-- objects/
 |   |-- IntegrationTransaction__c/
 |   |-- IntegrationAttempt__c/
@@ -169,7 +175,7 @@ sf package install \
 
 Then:
 
-1. Assign `SF Integration Framework Admin` to administrators who need to inspect or manage framework records.
+1. Assign `SF Integration Framework Admin` to administrators who need to inspect or manage framework records, **and to any user whose transactions register integration work**. Registering inserts an `IntegrationTransaction__c`, which fails with "fields being inaccessible" if the running user has no field access.
 2. Configure the target org's Named Credential and External Credential.
 3. Create an `IntegrationDefinition__mdt` record for each integration.
 4. Implement an Apex class that implements `IntegrationOperationHandler`.
@@ -192,7 +198,16 @@ Important fields:
 | `RetryableStatusCodes__c` | Comma-separated HTTP codes; defaults to `408,429,500,502,503,504` |
 | `IdempotencyEnabled__c` | Whether the remote system guarantees duplicate-safe processing for the configured key |
 | `IdempotencyHeader__c` | Header name, default `Idempotency-Key` |
+| `RetryEnabled__c` | Master switch for retries on this integration |
+| `MaxPayloadChars__c` | Persisted payloads are truncated to this length |
 | `LogRequestBody__c` / `LogResponseBody__c` | Explicit opt-in payload persistence |
+
+A definition is validated the first time it is read, and an invalid one fails
+the transaction it belongs to rather than misbehaving later. The rules:
+`TimeoutMs__c` between 1 and 120000; `ProcessingLeaseSeconds__c` at least the
+timeout plus 30 seconds, because a lease shorter than its own callout lets
+recovery reclaim work that is still running; `MaxPayloadChars__c` between 1
+and 32768; `MaxRetries__c` not negative; `RetryBaseDelaySeconds__c` at least 1.
 
 Do **not** enable `IdempotencyEnabled__c` merely because Salesforce generates a key. The remote API must actually consume and enforce that key.
 
