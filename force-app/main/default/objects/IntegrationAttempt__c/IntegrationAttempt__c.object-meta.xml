@@ -8,5 +8,5 @@
         <type>AutoNumber</type>
     </nameField>
     <pluralLabel>Integration Attempts</pluralLabel>
-    <sharingModel>ReadWrite</sharingModel>
+    <sharingModel>ControlledByParent</sharingModel>
 </CustomObject>

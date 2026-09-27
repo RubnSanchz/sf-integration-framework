@@ -39,7 +39,10 @@ Package versions need 75% org-wide Apex coverage to be promotable. The package a
 ## Keeping metadata in sync (easy to forget)
 
 - `manifest/package.xml` is hand-maintained. Add every new Apex class, object, or permission set to it.
-- `SF_Integration_Framework_Admin.permissionset-meta.xml` lists `fieldPermissions` per custom field. New fields on `IntegrationTransaction__c` / `IntegrationAttempt__c` must be added there.
+- `SF_Integration_Framework_Admin.permissionset-meta.xml` lists `fieldPermissions` per custom field. New fields on `IntegrationTransaction__c` / `IntegrationAttempt__c` must be added there, **except required and master-detail fields**: their FLS is implicit and the deploy fails with "You cannot deploy to a required field".
+- Inside the permission set, repeated elements must be contiguous and in XSD order (`description`, `fieldPermissions`, `hasActivationRequired`, `label`, `objectPermissions`). Interleaving two `objectPermissions` blocks fails the whole deployment with "Element objectPermissions is duplicated at this location".
+- Every `*.field-meta.xml` needs an explicit `<fullName>` matching its file name, or the deploy fails with "element fullName missing for a child of type CustomField".
+- `IntegrationAttempt__c` is a master-detail child, so its `sharingModel` must stay `ControlledByParent`.
 - Every `.cls` needs a sibling `.cls-meta.xml` (apiVersion 67.0, status Active).
 - The string constants in `IntegrationConstants` must match the restricted picklists on `IntegrationTransaction__c.Status__c` and `IntegrationAttempt__c.Result__c`.
 - Named Credentials are deliberately **not** packaged; never add environment-specific credential metadata to `force-app`.
