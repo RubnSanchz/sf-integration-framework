@@ -25,7 +25,6 @@ Apex conventions and the decisions behind them. The root `CLAUDE.md` has the arc
 
 ## Known rough edges, already logged for the cleanup phase
 
-- `IntegrationCoreTest` is a grab-bag covering five classes, while `IntegrationExecutionJobTest` follows `<Class>Test`. Decide the split before adding more test classes.
 - `ERROR_CONFIGURATION` holds `'CONFIGURATION_ERROR'`: the prefix is a family marker, not part of the value, but it reads like a mistake.
 - `MAX_PAYLOAD_CHARS` (the 32768 ceiling) and `DEFAULT_MAX_PAYLOAD_CHARS` (the 12000 default) sit one word apart in `IntegrationConfigService` and mean opposite things. `IntegrationSanitizer.DEFAULT_MAX_CHARS` duplicates that 12000.
 - `parked()` and `terminal()` are adjectives used as factory methods.

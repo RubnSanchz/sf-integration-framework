@@ -40,8 +40,8 @@ Deploy and test against it:
 sf project deploy start --target-org sif-scratch                                   # all source
 sf project deploy start --target-org sif-scratch --source-dir force-app/main/default/classes/support/IntegrationHttpClient.cls
 sf apex run test --target-org sif-scratch --test-level RunLocalTests --wait 20
-sf apex run test --target-org sif-scratch --class-names IntegrationCoreTest --code-coverage --wait 10
-sf apex run test --target-org sif-scratch --tests IntegrationCoreTest.sanitizerRedactsSecretsAndTruncatesPayloads --wait 10
+sf apex run test --target-org sif-scratch --class-names IntegrationSanitizerTest --code-coverage --wait 10
+sf apex run test --target-org sif-scratch --tests IntegrationSanitizerTest.sanitizerRedactsSecretsAndTruncatesPayloads --wait 10
 ```
 
 Manifest-based validation (deploying without the package) and package versioning:

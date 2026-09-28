@@ -6,7 +6,12 @@
         <members>IntegrationClaimJob</members>
         <members>IntegrationConfigService</members>
         <members>IntegrationConstants</members>
-        <members>IntegrationCoreTest</members>
+        <members>IntegrationConfigServiceTest</members>
+        <members>IntegrationConstantsTest</members>
+        <members>IntegrationRecoverySchedulerTest</members>
+        <members>IntegrationRetryPolicyTest</members>
+        <members>IntegrationSanitizerTest</members>
+        <members>IntegrationTransactionServiceTest</members>
         <members>IntegrationDispatchScheduler</members>
         <members>IntegrationExecutionJob</members>
         <members>IntegrationExecutionJobTest</members>

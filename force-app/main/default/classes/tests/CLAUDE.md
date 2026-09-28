@@ -1,5 +1,8 @@
 # classes/tests/
 
+One test class per production class, named `<Class>Test`. `IntegrationTestDataFactory` is the exception: it holds no tests, only shared data.
+
+
 - **Everything shared lives in `IntegrationTestDataFactory`:** the configuration seam, the transaction builders, the requery helpers and the test user. Add to it rather than copying a helper into a second test class, which is how the config builder ended up duplicated verbatim before.
 - **Tests run as a framework user, not as you.** `@TestSetup` calls `IntegrationTestDataFactory.createFrameworkUser()`, which creates a user on the `Minimum Access - Salesforce` profile and assigns `SF_Integration_Framework_Admin` and nothing else. Every test that touches `IntegrationTransaction__c` or `IntegrationAttempt__c` wraps its body in `System.runAs(IntegrationTestDataFactory.frameworkUser())`. Two reasons: the suite stops depending on whoever launches it, which is what would break `sf package version create` in a clean packaging org, and it proves the shipped permission set is enough on its own.
 - The user and its assignment are **setup objects**, so they cannot be inserted in the same transaction as business records. That is why they go in `@TestSetup` and not in a helper called from the test body.
