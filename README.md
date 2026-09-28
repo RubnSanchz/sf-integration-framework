@@ -234,6 +234,7 @@ Important fields:
 | `IdempotencyEnabled__c` | Whether the remote system guarantees duplicate-safe processing for the configured key |
 | `IdempotencyHeader__c` | Header name, default `Idempotency-Key` |
 | `RetryEnabled__c` | Master switch for retries on this integration |
+| `RetentionDays__c` | Days a successful transaction is kept before the purge batch deletes it; defaults to 30 |
 | `MaxPayloadChars__c` | Persisted payloads are truncated to this length |
 | `LogRequestBody__c` / `LogResponseBody__c` | Explicit opt-in payload persistence |
 
@@ -319,6 +320,13 @@ System.schedule(
 );
 ```
 
+System.schedule(
+    'SIF Purge',
+    '0 0 3 * * ?',
+    new IntegrationPurgeBatch()
+);
+```
+
 The dispatcher picks up work that has never executed and work whose `Disposition__c` is `RETRY` with a due `NextRetryAt__c`. Recovery handles only what never reached a normal ending: expired processing leases, and uncertain outcomes awaiting evaluation. It only auto-requeues uncertain work when remote idempotency is configured.
 
 ### Reading and steering a transaction
@@ -334,6 +342,20 @@ The dispatcher picks up work that has never executed and work whose `Disposition
 | `TERMINAL` | Finished without success and there is nothing left to try. | Nothing, or `RETRY` to force another attempt. |
 
 To requeue a parked transaction by hand, set `Disposition__c` to `RETRY`. Leave `NextRetryAt__c` empty to have it dispatched on the next run, or set a date to delay it. Nothing else has to change: `Status__c` keeps recording what actually happened.
+
+### Keeping the tables from growing forever
+
+`IntegrationPurgeBatch` deletes transactions that finished successfully longer ago than their integration's `RetentionDays__c`, and their attempts follow through the master-detail relationship. Nothing else is ever deleted: a failure, an uncertain outcome or anything still waiting on a person is evidence, and keeping it is the point of the outbox.
+
+Every record counts as 2 KB against data storage whatever it actually contains, so one business operation that took three attempts occupies four records, about 8 KB. At a thousand operations a day that is roughly 8 MB a day, or 240 MB a month, which is why this is scheduled rather than optional.
+
+Deleted records sit in the recycle bin for 15 days and keep counting against storage until then. To reclaim it immediately, at the cost of making the deletion unrecoverable:
+
+```apex
+System.schedule('SIF Purge', '0 0 3 * * ?', new IntegrationPurgeBatch(200, true));
+```
+
+A transaction whose `IntegrationDefinition__mdt` no longer resolves is never purged. A missing definition is a configuration problem, not permission to delete the history.
 
 ## Security
 

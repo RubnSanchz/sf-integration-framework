@@ -9,6 +9,7 @@ public inherited sharing class IntegrationConfigService {
     private static final Integer DEFAULT_MAX_RETRIES = 3;
     private static final Integer DEFAULT_RETRY_BASE_DELAY_SECONDS = 60;
     private static final Integer DEFAULT_MAX_PAYLOAD_CHARS = 12000;
+    private static final Integer DEFAULT_RETENTION_DAYS = 30;
     private static final Set<Integer> DEFAULT_RETRYABLE_STATUS_CODES =
         new Set<Integer>{408, 429, 500, 502, 503, 504};
 
@@ -36,6 +37,7 @@ public inherited sharing class IntegrationConfigService {
         public Boolean logRequestBody;
         public Boolean logResponseBody;
         public Integer maxPayloadChars;
+        public Integer retentionDays;
         public Set<Integer> retryableStatusCodes = new Set<Integer>();
     }
 
@@ -93,6 +95,7 @@ public inherited sharing class IntegrationConfigService {
         config.logRequestBody = definition.LogRequestBody__c;
         config.logResponseBody = definition.LogResponseBody__c;
         config.maxPayloadChars = integerValue(definition.MaxPayloadChars__c, DEFAULT_MAX_PAYLOAD_CHARS);
+        config.retentionDays = integerValue(definition.RetentionDays__c, DEFAULT_RETENTION_DAYS);
         config.retryableStatusCodes = parseStatusCodes(definition.RetryableStatusCodes__c, integrationKey);
 
         validate(config);
@@ -144,12 +147,31 @@ public inherited sharing class IntegrationConfigService {
             throw invalid(config, 'RetryBaseDelaySeconds__c must be at least 1 second, found ' +
                 config.retryBaseDelaySeconds);
         }
+
+        if (config.retentionDays < 1) {
+            throw invalid(config, 'RetentionDays__c must be at least 1 day, found ' +
+                config.retentionDays);
+        }
     }
 
     private static IntegrationConfigurationException invalid(Config config, String detail) {
         return new IntegrationConfigurationException(
             'Invalid IntegrationDefinition__mdt for ' + config.integrationKey + ': ' + detail
         );
+    }
+
+    // The purge runs one query for every integration at once, so it needs the
+    // shortest retention in the org to bound it. Anything older than that is a
+    // candidate; each record is then checked against its own integration.
+    public static Integer shortestRetentionDays() {
+        Integer shortest = DEFAULT_RETENTION_DAYS;
+        for (IntegrationDefinition__mdt definition : IntegrationDefinition__mdt.getAll().values()) {
+            Integer retention = integerValue(definition.RetentionDays__c, DEFAULT_RETENTION_DAYS);
+            if (retention < shortest) {
+                shortest = retention;
+            }
+        }
+        return shortest;
     }
 
     @TestVisible

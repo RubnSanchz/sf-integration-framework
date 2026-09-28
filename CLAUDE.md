@@ -115,13 +115,15 @@ IntegrationFramework.registerAndEnqueue(request)    caller's transaction: insert
 
 `RECONCILE` means "uncertain, not yet evaluated". `IntegrationRecoveryScheduler` is the evaluator and every run turns each one into RETRY or MANUAL, which is what keeps that window draining instead of filling with records nobody will requeue.
 
+**Schedulers** (customers schedule them via `System.schedule`, see README): `IntegrationPurgeBatch` is Batchable and Schedulable; it deletes only `SUCCESS` transactions older than their integration's `RetentionDays__c` (30 by default), never anything carrying `MANUAL` or `RECONCILE`, and never a transaction whose definition no longer resolves. Attempts cascade through the master-detail.
+
 **Schedulers** (customers schedule them via `System.schedule`, see README): `IntegrationDispatchScheduler` enqueues a claim job for each due record, per the predicate above (max 40 per run). `IntegrationRecoveryScheduler` handles only what had no normal ending: expired `PROCESSING` leases, which become a synthetic `STALE_LEASE` attempt plus an `UNKNOWN` transaction, and `UNKNOWN` + `RECONCILE` records. Both sweeps catch configuration errors per record, park that one as MANUAL and carry on.
 
 **Retry math** (`IntegrationRetryPolicy`): `MaxRetries__c` counts retries *after* the first attempt, so `canRetry` is `attemptCount <= maxRetries`. Backoff is `base * 2^(attempt-1)` with the exponent capped at 10.
 
 Other things worth knowing before editing:
 
-- `IntegrationConfigService.get()` owns all defaults (timeout 30000 ms, lease 60 s, 3 retries, 60 s base delay, 12000 payload chars, retryable codes 408/429/500/502/503/504, header `Idempotency-Key`). Change defaults there, not at call sites. It also validates every definition and caches one `Config` per key per Apex transaction, so `get()` is cheap to call in a loop.
+- `IntegrationConfigService.get()` owns all defaults (timeout 30000 ms, lease 60 s, 3 retries, 60 s base delay, 12000 payload chars, 30 days retention, retryable codes 408/429/500/502/503/504, header `Idempotency-Key`). Change defaults there, not at call sites. It also validates every definition and caches one `Config` per key per Apex transaction, so `get()` is cheap to call in a loop.
 - `IntegrationOperationHandler.buildRequest()` runs inside a savepoint with a DML counter. If it writes, the write is rolled back and the attempt is refused as `HANDLER_DML` without calling out, because that DML would otherwise turn the callout into an "uncommitted work pending" failure that reads exactly like an uncertain remote call.
 - `IntegrationHttpClient` builds the endpoint as `callout:<NamedCredential__c>` + path, silently drops `Authorization` / `Proxy-Authorization` / `Host` headers supplied by handlers, and sets the idempotency header only when idempotency is enabled.
 - Bodies are persisted only when `LogRequestBody__c` / `LogResponseBody__c` are true, always through `IntegrationSanitizer.sanitize` (regex redaction of token/password keys, then truncation). Headers are never persisted.

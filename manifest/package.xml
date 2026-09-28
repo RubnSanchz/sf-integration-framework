@@ -13,6 +13,8 @@
         <members>IntegrationHandlerFactory</members>
         <members>IntegrationHttpClient</members>
         <members>IntegrationOperationHandler</members>
+        <members>IntegrationPurgeBatch</members>
+        <members>IntegrationPurgeBatchTest</members>
         <members>IntegrationRecoveryScheduler</members>
         <members>IntegrationRequest</members>
         <members>IntegrationResponse</members>

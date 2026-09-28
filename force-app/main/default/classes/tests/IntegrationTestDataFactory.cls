@@ -64,6 +64,7 @@ public class IntegrationTestDataFactory {
         config.logRequestBody = false;
         config.logResponseBody = false;
         config.maxPayloadChars = 12000;
+        config.retentionDays = 30;
         config.retryableStatusCodes.addAll(new Set<Integer>{408, 429, 500, 502, 503, 504});
         IntegrationConfigService.setTestConfig(config);
         return config;

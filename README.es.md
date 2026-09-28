@@ -236,6 +236,7 @@ Campos importantes:
 | `IdempotencyEnabled__c` | Si el sistema remoto garantiza un procesamiento seguro frente a duplicados para la clave configurada |
 | `IdempotencyHeader__c` | Nombre de la cabecera, por defecto `Idempotency-Key` |
 | `RetryEnabled__c` | Interruptor general de reintentos para esta integración |
+| `RetentionDays__c` | Días que se conserva una transacción con éxito antes de que la purga la borre; por defecto 30 |
 | `MaxPayloadChars__c` | Los payloads persistidos se truncan a esta longitud |
 | `LogRequestBody__c` / `LogResponseBody__c` | Persistencia de payloads mediante opt-in explícito |
 
@@ -321,6 +322,13 @@ System.schedule(
 );
 ```
 
+System.schedule(
+    'SIF Purge',
+    '0 0 3 * * ?',
+    new IntegrationPurgeBatch()
+);
+```
+
 El dispatcher recoge el trabajo que nunca se ha ejecutado y aquel cuyo `Disposition__c` es `RETRY` con `NextRetryAt__c` vencido. La recuperación se ocupa solo de lo que nunca llegó a un final normal: leases de procesamiento expirados y resultados inciertos pendientes de evaluar. Solo reencola automáticamente el trabajo incierto cuando la idempotencia remota está configurada.
 
 ### Leer y dirigir una transacción
@@ -336,6 +344,20 @@ El dispatcher recoge el trabajo que nunca se ha ejecutado y aquel cuyo `Disposit
 | `TERMINAL` | Terminó sin éxito y no queda nada que intentar. | Nada, o `RETRY` para forzar otro intento. |
 
 Para reencolar a mano una transacción aparcada, pon `Disposition__c` a `RETRY`. Deja `NextRetryAt__c` vacío para que se despache en la siguiente pasada, o ponle fecha para retrasarla. No hace falta tocar nada más: `Status__c` sigue registrando lo que de verdad ocurrió.
+
+### Evitar que las tablas crezcan sin fin
+
+`IntegrationPurgeBatch` borra las transacciones que terminaron con éxito hace más tiempo que el `RetentionDays__c` de su integración, y sus intentos caen en cascada por la relación master-detail. No borra nada más: un fallo, un resultado incierto o cualquier cosa pendiente de una persona son evidencia, y conservarlos es justo para lo que existe el outbox.
+
+Cada registro cuenta 2 KB contra el almacenamiento de datos, contenga lo que contenga, así que una operación de negocio que necesitó tres intentos ocupa cuatro registros, unos 8 KB. A mil operaciones diarias son unos 8 MB al día, 240 MB al mes, y por eso esto se programa en vez de quedar como opcional.
+
+Los registros borrados permanecen 15 días en la papelera y siguen contando contra el almacenamiento hasta entonces. Para liberarlo de inmediato, a cambio de que el borrado sea irrecuperable:
+
+```apex
+System.schedule('SIF Purge', '0 0 3 * * ?', new IntegrationPurgeBatch(200, true));
+```
+
+Una transacción cuyo `IntegrationDefinition__mdt` ya no resuelve nunca se purga. Que falte la definición es un problema de configuración, no un permiso para borrar su historial.
 
 ## Seguridad
 

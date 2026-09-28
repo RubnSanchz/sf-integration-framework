@@ -46,7 +46,13 @@ Only enable it when the remote API guarantees that repeated requests with the sa
 
 ## Data retention
 
-`IntegrationAttempt__c` can grow quickly in high-volume orgs. Define retention/archival policies before enabling verbose payload logging or deploying the framework at scale.
+`IntegrationAttempt__c` can grow quickly in high-volume orgs. Every record counts as 2 KB against data storage whatever it contains, so one operation that took three attempts occupies four records.
+
+`IntegrationPurgeBatch` enforces retention. It deletes only transactions in `SUCCESS`, older than their integration's `RetentionDays__c` (30 by default), and their attempts cascade with them. Failures, uncertain outcomes and anything carrying `MANUAL` or `RECONCILE` are never deleted automatically: they are the evidence someone needs in order to decide, and deleting them would hide an unresolved side effect on the remote system rather than resolve it.
+
+Deleted records remain in the recycle bin for 15 days and keep counting against storage. `new IntegrationPurgeBatch(scope, true)` empties it immediately, which frees the storage at the cost of making the deletion unrecoverable. Decide that per org: a longer window is a cheap safety net against a retention misconfigured too aggressively.
+
+Enable verbose payload logging with the retention already scheduled, not after.
 
 ## Package considerations
 

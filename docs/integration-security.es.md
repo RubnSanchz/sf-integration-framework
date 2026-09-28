@@ -48,7 +48,13 @@ Habilítalo solo cuando la API remota garantice que peticiones repetidas con la 
 
 ## Retención de datos
 
-`IntegrationAttempt__c` puede crecer rápidamente en orgs de alto volumen. Define políticas de retención/archivado antes de habilitar el logging detallado de payloads o de desplegar el framework a escala.
+`IntegrationAttempt__c` puede crecer rápidamente en orgs de alto volumen. Cada registro cuenta 2 KB contra el almacenamiento de datos, contenga lo que contenga, así que una operación que necesitó tres intentos ocupa cuatro registros.
+
+`IntegrationPurgeBatch` aplica la retención. Borra solo transacciones en `SUCCESS` más antiguas que el `RetentionDays__c` de su integración (30 por defecto), y sus intentos caen en cascada. Los fallos, los resultados inciertos y cualquier cosa con `MANUAL` o `RECONCILE` nunca se borran automáticamente: son la evidencia que alguien necesita para decidir, y borrarlos ocultaría un efecto secundario sin resolver en el sistema remoto en vez de resolverlo.
+
+Los registros borrados permanecen 15 días en la papelera y siguen contando contra el almacenamiento. `new IntegrationPurgeBatch(scope, true)` la vacía de inmediato, lo que libera el espacio a cambio de que el borrado sea irrecuperable. Decídelo por org: una ventana más larga es una red de seguridad barata frente a una retención configurada demasiado agresiva.
+
+Habilita el logging detallado de payloads con la retención ya programada, no después.
 
 ## Consideraciones del paquete
 
