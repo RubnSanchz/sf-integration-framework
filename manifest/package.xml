@@ -18,6 +18,7 @@
         <members>IntegrationResponse</members>
         <members>IntegrationRetryPolicy</members>
         <members>IntegrationSanitizer</members>
+        <members>IntegrationTestDataFactory</members>
         <members>IntegrationTransactionService</members>
         <name>ApexClass</name>
     </types>

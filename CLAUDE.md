@@ -130,4 +130,11 @@ Other things worth knowing before editing:
 
 ## Testing
 
-Custom Metadata cannot be inserted in tests, so `IntegrationCoreTest` injects configuration through the `@TestVisible` seam `IntegrationConfigService.setTestConfig(config)`, which `get()` honours only under `Test.isRunningTest()`. Use that seam in new tests rather than relying on `IntegrationDefinition__mdt` records. `IntegrationExecutionJob` and `IntegrationHttpClient` currently have no callout-mock coverage; if you test them, use `Test.setMock(HttpCalloutMock.class, ...)` and a handler class defined inside the test.
+`IntegrationTestDataFactory` holds everything shared between test classes: the configuration seam, the transaction builders and the test user. `classes/tests/CLAUDE.md` has the details.
+
+Two rules that are easy to break:
+
+- **Tests run as a user holding nothing but the shipped permission set**, created in `@TestSetup` and entered with `System.runAs`. Any test doing DML on `IntegrationTransaction__c` or `IntegrationAttempt__c` belongs inside that block; outside it, the test silently depends on whoever launched it and fails in a clean packaging org with "fields being inaccessible". This also makes the suite prove the permission set is sufficient on its own. Verified by unassigning it from the developer's user: 38/38 still pass.
+- **Custom Metadata cannot be inserted in tests**, so configuration goes in through the `@TestVisible` seam `IntegrationConfigService.setTestConfig(config)`, which `get()` honours only under `Test.isRunningTest()`. To test the parsing, build an `IntegrationDefinition__mdt` in memory and call `fromDefinition`; for the cache, call `cached`.
+
+`IntegrationExecutionJobTest` owns the callout infrastructure: a mock that counts calls, can throw a `CalloutException` and can steal the transaction mid-flight, plus a handler with five failure modes. `IntegrationHttpClient` still has no coverage of its own, and `IntegrationClaimJob` and `IntegrationRequest` are the two thinnest at 53% and 45%.
