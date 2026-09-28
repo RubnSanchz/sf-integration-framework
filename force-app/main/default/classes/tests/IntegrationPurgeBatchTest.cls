@@ -147,4 +147,25 @@ private class IntegrationPurgeBatchTest {
             );
         }
     }
+    @IsTest
+    static void emptyingTheRecycleBinIsOptIn() {
+        IntegrationTestDataFactory.config(true);
+        System.runAs(IntegrationTestDataFactory.frameworkUser()) {
+            IntegrationTransaction__c old = completed('purge-bin-001', 40);
+
+            Test.startTest();
+            Database.executeBatch(new IntegrationPurgeBatch(200, true), 200);
+            Test.stopTest();
+
+            System.assertEquals(
+                false,
+                stillThere(old.Id),
+                'The flag changes how the space is reclaimed, not what is deleted.'
+            );
+            // Whether the recycle bin was actually emptied is not observable from a
+            // test: ALL ROWS still returns the record. What this pins is that the
+            // opt-in path runs and deletes the same records as the default one.
+        }
+    }
+
 }

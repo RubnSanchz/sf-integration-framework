@@ -45,12 +45,8 @@ public inherited sharing class IntegrationConfigService {
         if (Test.isRunningTest() && testConfigs.containsKey(integrationKey)) {
             return testConfigs.get(integrationKey);
         }
-        if (CACHE.containsKey(integrationKey)) {
-            return CACHE.get(integrationKey);
-        }
-
-        // getInstance() is not a SOQL query, but the parsing and validation below are
-        // worth doing once per transaction.
+        // getInstance() is not a SOQL query, so there is nothing to save by
+        // checking the cache before it: cached() checks it either way.
         IntegrationDefinition__mdt definition = IntegrationDefinition__mdt.getInstance(integrationKey);
         if (definition == null) {
             throw new IntegrationConfigurationException('Missing IntegrationDefinition__mdt for ' + integrationKey);

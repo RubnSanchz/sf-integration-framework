@@ -66,4 +66,12 @@ private class IntegrationSanitizerTest {
         System.assert(!sanitized.contains('eyJhbGciOi'), sanitized);
         System.assert(sanitized.contains('Bearer [REDACTED]'), sanitized);
     }
+    @IsTest
+    static void sanitizingNullHeadersGivesAnEmptyMap() {
+        Map<String, String> result = IntegrationSanitizer.sanitizeHeaders(null);
+
+        System.assertNotEquals(null, result, 'Never null, so callers need no guard.');
+        System.assertEquals(true, result.isEmpty());
+    }
+
 }

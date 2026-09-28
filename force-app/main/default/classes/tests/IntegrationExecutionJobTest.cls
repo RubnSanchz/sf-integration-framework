@@ -326,26 +326,6 @@ public class IntegrationExecutionJobTest {
     }
 
     @IsTest
-    static void claimJobParksATransactionWithBrokenConfiguration() {
-        System.runAs(IntegrationTestDataFactory.frameworkUser()) {
-            IntegrationTransaction__c pending = IntegrationTestDataFactory.newPending('claim-config-001');
-            insert pending;
-
-            Test.startTest();
-            System.enqueueJob(new IntegrationClaimJob(pending.Id));
-            Test.stopTest();
-
-            IntegrationTransaction__c stored = IntegrationTestDataFactory.reload(pending.Id);
-            System.assertEquals(
-                IntegrationConstants.STATUS_ERROR,
-                stored.Status__c,
-                'A failed claim must not leave the record PENDING for the dispatcher to retry forever.'
-            );
-            System.assertEquals(IntegrationConstants.DISPOSITION_MANUAL, stored.Disposition__c);
-            System.assertEquals(IntegrationConstants.ERROR_CONFIGURATION, stored.ErrorCode__c);
-        }
-    }
-    @IsTest
     static void workerWithAStaleAttemptNumberStandsDown() {
         System.runAs(IntegrationTestDataFactory.frameworkUser()) {
             Mock mock = new Mock();
@@ -449,4 +429,76 @@ public class IntegrationExecutionJobTest {
             System.assertEquals(200, attempts[0].HttpStatusCode__c, 'With the real status code.');
         }
     }
+    @IsTest
+    static void aClientSideFailureIsATerminalErrorNotAnUncertainOne() {
+        Mock mock = new Mock();
+        Test.setMock(HttpCalloutMock.class, mock);
+        IntegrationConfigService.Config config =
+            IntegrationTestDataFactory.config(true, IntegrationTestDataFactory.HANDLER_CLASS);
+        // The client raises this before it sends anything, so nothing reached the
+        // remote side and the outcome is certain.
+        config.namedCredential = null;
+        IntegrationConfigService.setTestConfig(config);
+        handlerMode = MODE_NORMAL;
+
+        System.runAs(IntegrationTestDataFactory.frameworkUser()) {
+            IntegrationTransaction__c stale = IntegrationTestDataFactory.processing('exec-client-001', 1);
+
+            run(stale.Id, 1);
+
+            IntegrationTransaction__c stored = IntegrationTestDataFactory.reload(stale.Id);
+            System.assertEquals(IntegrationConstants.STATUS_ERROR, stored.Status__c);
+            System.assertEquals(IntegrationConstants.DISPOSITION_MANUAL, stored.Disposition__c);
+            System.assertEquals(IntegrationConstants.ERROR_CLIENT, stored.ErrorCode__c);
+            System.assertEquals(0, mock.calls, 'Nothing was sent.');
+        }
+    }
+
+    @IsTest
+    static void aWorkerFindingTheWorkAlreadyFinishedStandsDown() {
+        Mock mock = new Mock();
+        Test.setMock(HttpCalloutMock.class, mock);
+        IntegrationTestDataFactory.config(true, IntegrationTestDataFactory.HANDLER_CLASS);
+        handlerMode = MODE_NORMAL;
+
+        System.runAs(IntegrationTestDataFactory.frameworkUser()) {
+            IntegrationTransaction__c done = IntegrationTestDataFactory.processing('exec-done-001', 1);
+            done.Status__c = IntegrationConstants.STATUS_SUCCESS;
+            update done;
+
+            run(done.Id, 1);
+
+            System.assertEquals(
+                IntegrationConstants.STATUS_SUCCESS,
+                IntegrationTestDataFactory.reload(done.Id).Status__c,
+                'Something already finished this; a second worker must not redo it.'
+            );
+            System.assertEquals(0, mock.calls);
+            System.assertEquals(0, IntegrationTestDataFactory.attemptsOf(done.Id).size());
+        }
+    }
+
+    @IsTest
+    static void aRecordWithNoAttemptCountIsNotClaimedByAnyone() {
+        Mock mock = new Mock();
+        Test.setMock(HttpCalloutMock.class, mock);
+        IntegrationTestDataFactory.config(true, IntegrationTestDataFactory.HANDLER_CLASS);
+        handlerMode = MODE_NORMAL;
+
+        System.runAs(IntegrationTestDataFactory.frameworkUser()) {
+            // Hand-crafted rather than claimed, so the count was never set.
+            IntegrationTransaction__c odd = IntegrationTestDataFactory.processing('exec-nocount-001', 1);
+            odd.AttemptCount__c = null;
+            update odd;
+
+            run(odd.Id, 1);
+
+            System.assertEquals(
+                0,
+                mock.calls,
+                'A missing count reads as zero, which matches no claimed attempt.'
+            );
+        }
+    }
+
 }

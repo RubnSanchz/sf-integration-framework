@@ -130,4 +130,15 @@ private class IntegrationConfigServiceTest {
             'Clearing the test state must also clear the cache.'
         );
     }
+    @IsTest
+    static void anIntegrationCanNameItsOwnIdempotencyHeader() {
+        IntegrationDefinition__mdt custom = IntegrationTestDataFactory.definition();
+        custom.IdempotencyHeader__c = 'X-Request-Id';
+
+        System.assertEquals(
+            'X-Request-Id',
+            IntegrationConfigService.fromDefinition('TEST', custom).idempotencyHeader
+        );
+    }
+
 }

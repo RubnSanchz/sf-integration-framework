@@ -6,12 +6,19 @@ public class IntegrationClaimJob implements Queueable {
     }
 
     public void execute(QueueableContext context) {
-        IntegrationTransaction__c current = [
+        // A list, not a single row: the record can be gone by the time this runs,
+        // and a QueryException here would fail the whole job with nothing written
+        // down about why.
+        List<IntegrationTransaction__c> found = [
             SELECT Id, IntegrationKey__c
             FROM IntegrationTransaction__c
             WHERE Id = :transactionId
             LIMIT 1
         ];
+        if (found.isEmpty()) {
+            return;
+        }
+        IntegrationTransaction__c current = found[0];
 
         IntegrationConfigService.Config config;
         try {

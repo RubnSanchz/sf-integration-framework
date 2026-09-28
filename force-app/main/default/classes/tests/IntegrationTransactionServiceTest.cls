@@ -124,4 +124,55 @@ private class IntegrationTransactionServiceTest {
             );
         }
     }
+    @IsTest
+    static void anOperationWithoutAKeyGetsOneGenerated() {
+        IntegrationTestDataFactory.config(true);
+        IntegrationRequest request = new IntegrationRequest('TEST', 'CREATE', 'POST', '/resource');
+
+        System.runAs(IntegrationTestDataFactory.frameworkUser()) {
+            IntegrationTransaction__c created = IntegrationTransactionService.create(request);
+
+            System.assertNotEquals(
+                null,
+                created.IdempotencyKey__c,
+                'The key is what makes a retry safe, so one is always present.'
+            );
+            System.assertEquals(
+                64,
+                created.IdempotencyKey__c.length(),
+                'A SHA-256 digest in hex.'
+            );
+
+            IntegrationTransaction__c second = IntegrationTransactionService.create(
+                new IntegrationRequest('TEST', 'CREATE', 'POST', '/resource')
+            );
+            System.assertNotEquals(
+                created.IdempotencyKey__c,
+                second.IdempotencyKey__c,
+                'Two registrations are two operations.'
+            );
+        }
+    }
+
+    @IsTest
+    static void registeringWithoutTheRequiredFieldsIsRefused() {
+        IntegrationTestDataFactory.config(true);
+
+        System.runAs(IntegrationTestDataFactory.frameworkUser()) {
+            for (IntegrationRequest invalid : new List<IntegrationRequest>{
+                null,
+                new IntegrationRequest(null, 'CREATE', 'POST', '/a'),
+                new IntegrationRequest('TEST', null, 'POST', '/a')
+            }) {
+                Boolean refused = false;
+                try {
+                    IntegrationTransactionService.create(invalid);
+                } catch (IntegrationTransactionService.IntegrationTransactionException ex) {
+                    refused = true;
+                }
+                System.assertEquals(true, refused, 'integrationKey and operation are required.');
+            }
+        }
+    }
+
 }

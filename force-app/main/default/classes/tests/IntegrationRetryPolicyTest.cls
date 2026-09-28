@@ -19,4 +19,20 @@ private class IntegrationRetryPolicyTest {
         transactionRecord.AttemptCount__c = 4;
         System.assertEquals(false, IntegrationRetryPolicy.canRetry(transactionRecord, config));
     }
+    @IsTest
+    static void aNullAttemptCountIsTreatedAsNoAttemptsYet() {
+        IntegrationConfigService.Config config = IntegrationTestDataFactory.config(true);
+        IntegrationTransaction__c neverCounted = new IntegrationTransaction__c();
+
+        System.assertEquals(
+            true,
+            IntegrationRetryPolicy.canRetry(neverCounted, config),
+            'A record with no attempt count has spent none of its budget.'
+        );
+        System.assert(
+            IntegrationRetryPolicy.nextRetryAt(neverCounted, config) >= System.now().addSeconds(59),
+            'And its backoff is the base delay, not zero.'
+        );
+    }
+
 }

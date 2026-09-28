@@ -161,4 +161,30 @@ private class IntegrationRecoverySchedulerTest {
             );
         }
     }
+    @IsTest
+    static void aReconcilableRecordWithNoDefinitionIsParkedForAPerson() {
+        IntegrationTestDataFactory.config(true);
+        System.runAs(IntegrationTestDataFactory.frameworkUser()) {
+            IntegrationTransaction__c orphan = IntegrationTestDataFactory.withDisposition(
+                'recover-orphan-001',
+                IntegrationConstants.STATUS_UNKNOWN,
+                IntegrationConstants.DISPOSITION_RECONCILE,
+                1,
+                null
+            );
+            orphan.IntegrationKey__c = 'NO_SUCH_INTEGRATION';
+            update orphan;
+
+            IntegrationRecoveryScheduler.recoverSafeUnknowns();
+
+            IntegrationTransaction__c stored = IntegrationTestDataFactory.reload(orphan.Id);
+            System.assertEquals(
+                IntegrationConstants.DISPOSITION_MANUAL,
+                stored.Disposition__c,
+                'Nothing automatic can evaluate it, so it has to leave the window.'
+            );
+            System.assertEquals(IntegrationConstants.ERROR_CONFIGURATION, stored.ErrorCode__c);
+        }
+    }
+
 }

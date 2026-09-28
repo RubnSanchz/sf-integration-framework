@@ -211,4 +211,19 @@ private class IntegrationHttpClientTest {
         System.assert(message.contains('NamedCredential__c'), message);
         System.assertEquals(null, mock.captured, 'And nothing was sent.');
     }
+    @IsTest
+    static void aHeaderWithNoNameIsDropped() {
+        CapturingMock mock = new CapturingMock();
+        Test.setMock(HttpCalloutMock.class, mock);
+
+        IntegrationHttpClient.send(
+            request('POST', '/a').withHeader('', 'orphan').withHeader('X-Kept', 'yes'),
+            transactionRecord(),
+            IntegrationTestDataFactory.config(true)
+        );
+
+        System.assertEquals('yes', mock.captured.getHeader('X-Kept'));
+        System.assertEquals(null, mock.captured.getHeader(''), 'A nameless header goes nowhere.');
+    }
+
 }
