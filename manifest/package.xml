@@ -2,6 +2,7 @@
 <Package xmlns="http://soap.sforce.com/2006/04/metadata">
     <types>
         <members>IntegrationAttemptService</members>
+        <members>IntegrationAttemptServiceTest</members>
         <members>IntegrationClaimJob</members>
         <members>IntegrationConfigService</members>
         <members>IntegrationConstants</members>
@@ -12,6 +13,9 @@
         <members>IntegrationFramework</members>
         <members>IntegrationHandlerFactory</members>
         <members>IntegrationHttpClient</members>
+        <members>IntegrationHandlerFactoryTest</members>
+        <members>IntegrationHttpClientTest</members>
+        <members>IntegrationRequestTest</members>
         <members>IntegrationOperationHandler</members>
         <members>IntegrationPurgeBatch</members>
         <members>IntegrationPurgeBatchTest</members>
