@@ -256,9 +256,10 @@ public class IntegrationExecutionJob implements Queueable, Database.AllowsCallou
         if (transactionRecord.Status__c != IntegrationConstants.STATUS_PROCESSING) {
             return false;
         }
-        if (expectedAttempt == null) {
-            return true;
-        }
+        // No null check on expectedAttempt: the only constructor requires it and
+        // claim() never leaves AttemptCount__c null, so it cannot be null here.
+        // If it somehow were, comparing it below stands the worker down, which is
+        // the safe direction anyway.
         Integer current = transactionRecord.AttemptCount__c == null
             ? 0
             : transactionRecord.AttemptCount__c.intValue();

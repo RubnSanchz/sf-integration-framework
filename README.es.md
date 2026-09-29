@@ -55,6 +55,12 @@ Transacción de negocio
 ```text
 force-app/main/default/
 |-- classes/
+|   |-- api/          superficie que toca el consumidor
+|   |-- pipeline/     queueables y schedulables
+|   |-- services/     las clases que hacen el DML
+|   |-- policy/       lógica de decisión pura, sin DML
+|   |-- support/      cliente http, sanitizer, factoría, constantes
+|   `-- tests/
 |-- objects/
 |   |-- IntegrationTransaction__c/
 |   |-- IntegrationAttempt__c/
@@ -171,11 +177,46 @@ sf package install \
 
 Después:
 
-1. Asigna `SF Integration Framework Admin` a los administradores que necesiten inspeccionar o gestionar los registros del framework.
+1. Asigna `SF Integration Framework Admin` a los administradores que necesiten inspeccionar o gestionar los registros del framework **y a cualquier usuario cuyas transacciones registren trabajo de integración**. Registrar inserta un `IntegrationTransaction__c`, que falla con "fields being inaccessible" si el usuario en ejecución no tiene acceso a los campos.
 2. Configura la Named Credential y la External Credential de la org de destino.
 3. Crea un registro `IntegrationDefinition__mdt` por cada integración.
 4. Implementa una clase Apex que implemente `IntegrationOperationHandler`.
 5. Programa los jobs de dispatcher/recuperación si quieres recuperación automática y drenado del trabajo pendiente.
+
+
+### Usar el paquete desde tu propio repositorio
+
+Tu repositorio no contiene el código de este paquete. Instalas una versión, igual que harías con cualquier otra dependencia.
+
+Tu repositorio contiene solo lo tuyo:
+
+- las clases Apex que implementan `IntegrationOperationHandler`
+- tu Named Credential y External Credential
+- tus registros de `IntegrationDefinition__mdt`
+
+Si construyes tu propio paquete, declara este como dependencia en lugar de copiarlo:
+
+```json
+"packageDirectories": [
+  {
+    "path": "force-app",
+    "default": true,
+    "dependencies": [
+      { "package": "sf-integration-framework@0.1.0-1" }
+    ]
+  }
+]
+```
+
+Para scratch orgs, instalar este paquete forma parte de preparar la org, no de desplegar tu código:
+
+```bash
+sf package install --package <id-de-version-04t> --target-org <alias-scratch> --wait 20
+```
+
+**No copies el código de este paquete en tu repositorio.** Los componentes se instalan como metadata ordinaria y editable, así que una copia en tu repositorio acabará desplegándose encima por tu propio pipeline y se desviará de la versión instalada. Terminarías manteniendo dos fuentes de verdad para las mismas clases.
+
+Si necesitas cambiar el framework, haz fork del repositorio, construye tu propia versión del paquete e instálala. Si solo quieres el código en local para leerlo, clona el repositorio en el tag correspondiente a tu versión instalada, o añade las clases a tu `.forceignore` para que tu pipeline no las despliegue nunca.
 
 ## Configurar una integración
 
@@ -194,7 +235,17 @@ Campos importantes:
 | `RetryableStatusCodes__c` | Códigos HTTP separados por comas; por defecto `408,429,500,502,503,504` |
 | `IdempotencyEnabled__c` | Si el sistema remoto garantiza un procesamiento seguro frente a duplicados para la clave configurada |
 | `IdempotencyHeader__c` | Nombre de la cabecera, por defecto `Idempotency-Key` |
+| `RetryEnabled__c` | Interruptor general de reintentos para esta integración |
+| `RetentionDays__c` | Días que se conserva una transacción con éxito antes de que la purga la borre; por defecto 30 |
+| `MaxPayloadChars__c` | Los payloads persistidos se truncan a esta longitud |
 | `LogRequestBody__c` / `LogResponseBody__c` | Persistencia de payloads mediante opt-in explícito |
+
+La definición se valida la primera vez que se lee, y una inválida hace fallar la
+transacción a la que pertenece en vez de comportarse mal más adelante. Las reglas:
+`TimeoutMs__c` entre 1 y 120000; `ProcessingLeaseSeconds__c` al menos el timeout
+más 30 segundos, porque un lease más corto que su propio callout permite que la
+recuperación reclame trabajo que sigue en marcha; `MaxPayloadChars__c` entre 1 y
+32768; `MaxRetries__c` no negativo; `RetryBaseDelaySeconds__c` al menos 1.
 
 **No** habilites `IdempotencyEnabled__c` solo porque Salesforce genere una clave. La API remota debe consumir y aplicar realmente esa clave.
 
@@ -271,6 +322,13 @@ System.schedule(
 );
 ```
 
+System.schedule(
+    'SIF Purge',
+    '0 0 3 * * ?',
+    new IntegrationPurgeBatch()
+);
+```
+
 El dispatcher recoge el trabajo que nunca se ha ejecutado y aquel cuyo `Disposition__c` es `RETRY` con `NextRetryAt__c` vencido. La recuperación se ocupa solo de lo que nunca llegó a un final normal: leases de procesamiento expirados y resultados inciertos pendientes de evaluar. Solo reencola automáticamente el trabajo incierto cuando la idempotencia remota está configurada.
 
 ### Leer y dirigir una transacción
@@ -286,6 +344,20 @@ El dispatcher recoge el trabajo que nunca se ha ejecutado y aquel cuyo `Disposit
 | `TERMINAL` | Terminó sin éxito y no queda nada que intentar. | Nada, o `RETRY` para forzar otro intento. |
 
 Para reencolar a mano una transacción aparcada, pon `Disposition__c` a `RETRY`. Deja `NextRetryAt__c` vacío para que se despache en la siguiente pasada, o ponle fecha para retrasarla. No hace falta tocar nada más: `Status__c` sigue registrando lo que de verdad ocurrió.
+
+### Evitar que las tablas crezcan sin fin
+
+`IntegrationPurgeBatch` borra las transacciones que terminaron con éxito hace más tiempo que el `RetentionDays__c` de su integración, y sus intentos caen en cascada por la relación master-detail. No borra nada más: un fallo, un resultado incierto o cualquier cosa pendiente de una persona son evidencia, y conservarlos es justo para lo que existe el outbox.
+
+Cada registro cuenta 2 KB contra el almacenamiento de datos, contenga lo que contenga, así que una operación de negocio que necesitó tres intentos ocupa cuatro registros, unos 8 KB. A mil operaciones diarias son unos 8 MB al día, 240 MB al mes, y por eso esto se programa en vez de quedar como opcional.
+
+Los registros borrados permanecen 15 días en la papelera y siguen contando contra el almacenamiento hasta entonces. Para liberarlo de inmediato, a cambio de que el borrado sea irrecuperable:
+
+```apex
+System.schedule('SIF Purge', '0 0 3 * * ?', new IntegrationPurgeBatch(200, true));
+```
+
+Una transacción cuyo `IntegrationDefinition__mdt` ya no resuelve nunca se purga. Que falte la definición es un problema de configuración, no un permiso para borrar su historial.
 
 ## Seguridad
 

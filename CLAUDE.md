@@ -40,8 +40,8 @@ Deploy and test against it:
 sf project deploy start --target-org sif-scratch                                   # all source
 sf project deploy start --target-org sif-scratch --source-dir force-app/main/default/classes/support/IntegrationHttpClient.cls
 sf apex run test --target-org sif-scratch --test-level RunLocalTests --wait 20
-sf apex run test --target-org sif-scratch --class-names IntegrationCoreTest --code-coverage --wait 10
-sf apex run test --target-org sif-scratch --tests IntegrationCoreTest.sanitizerRedactsSecretsAndTruncatesPayloads --wait 10
+sf apex run test --target-org sif-scratch --class-names IntegrationSanitizerTest --code-coverage --wait 10
+sf apex run test --target-org sif-scratch --tests IntegrationSanitizerTest.sanitizerRedactsSecretsAndTruncatesPayloads --wait 10
 ```
 
 Manifest-based validation (deploying without the package) and package versioning:
@@ -115,13 +115,15 @@ IntegrationFramework.registerAndEnqueue(request)    caller's transaction: insert
 
 `RECONCILE` means "uncertain, not yet evaluated". `IntegrationRecoveryScheduler` is the evaluator and every run turns each one into RETRY or MANUAL, which is what keeps that window draining instead of filling with records nobody will requeue.
 
+**Schedulers** (customers schedule them via `System.schedule`, see README): `IntegrationPurgeBatch` is Batchable and Schedulable; it deletes only `SUCCESS` transactions older than their integration's `RetentionDays__c` (30 by default), never anything carrying `MANUAL` or `RECONCILE`, and never a transaction whose definition no longer resolves. Attempts cascade through the master-detail.
+
 **Schedulers** (customers schedule them via `System.schedule`, see README): `IntegrationDispatchScheduler` enqueues a claim job for each due record, per the predicate above (max 40 per run). `IntegrationRecoveryScheduler` handles only what had no normal ending: expired `PROCESSING` leases, which become a synthetic `STALE_LEASE` attempt plus an `UNKNOWN` transaction, and `UNKNOWN` + `RECONCILE` records. Both sweeps catch configuration errors per record, park that one as MANUAL and carry on.
 
 **Retry math** (`IntegrationRetryPolicy`): `MaxRetries__c` counts retries *after* the first attempt, so `canRetry` is `attemptCount <= maxRetries`. Backoff is `base * 2^(attempt-1)` with the exponent capped at 10.
 
 Other things worth knowing before editing:
 
-- `IntegrationConfigService.get()` owns all defaults (timeout 30000 ms, lease 60 s, 3 retries, 60 s base delay, 12000 payload chars, retryable codes 408/429/500/502/503/504, header `Idempotency-Key`). Change defaults there, not at call sites. It also validates every definition and caches one `Config` per key per Apex transaction, so `get()` is cheap to call in a loop.
+- `IntegrationConfigService.get()` owns all defaults (timeout 30000 ms, lease 60 s, 3 retries, 60 s base delay, 12000 payload chars, 30 days retention, retryable codes 408/429/500/502/503/504, header `Idempotency-Key`). Change defaults there, not at call sites. It also validates every definition and caches one `Config` per key per Apex transaction, so `get()` is cheap to call in a loop.
 - `IntegrationOperationHandler.buildRequest()` runs inside a savepoint with a DML counter. If it writes, the write is rolled back and the attempt is refused as `HANDLER_DML` without calling out, because that DML would otherwise turn the callout into an "uncommitted work pending" failure that reads exactly like an uncertain remote call.
 - `IntegrationHttpClient` builds the endpoint as `callout:<NamedCredential__c>` + path, silently drops `Authorization` / `Proxy-Authorization` / `Host` headers supplied by handlers, and sets the idempotency header only when idempotency is enabled.
 - Bodies are persisted only when `LogRequestBody__c` / `LogResponseBody__c` are true, always through `IntegrationSanitizer.sanitize` (regex redaction of token/password keys, then truncation). Headers are never persisted.
@@ -130,4 +132,11 @@ Other things worth knowing before editing:
 
 ## Testing
 
-Custom Metadata cannot be inserted in tests, so `IntegrationCoreTest` injects configuration through the `@TestVisible` seam `IntegrationConfigService.setTestConfig(config)`, which `get()` honours only under `Test.isRunningTest()`. Use that seam in new tests rather than relying on `IntegrationDefinition__mdt` records. `IntegrationExecutionJob` and `IntegrationHttpClient` currently have no callout-mock coverage; if you test them, use `Test.setMock(HttpCalloutMock.class, ...)` and a handler class defined inside the test.
+`IntegrationTestDataFactory` holds everything shared between test classes: the configuration seam, the transaction builders and the test user. `classes/tests/CLAUDE.md` has the details.
+
+Two rules that are easy to break:
+
+- **Tests run as a user holding nothing but the shipped permission set**, created in `@TestSetup` and entered with `System.runAs`. Any test doing DML on `IntegrationTransaction__c` or `IntegrationAttempt__c` belongs inside that block; outside it, the test silently depends on whoever launched it and fails in a clean packaging org with "fields being inaccessible". This also makes the suite prove the permission set is sufficient on its own. Verified by unassigning it from the developer's user: 38/38 still pass.
+- **Custom Metadata cannot be inserted in tests**, so configuration goes in through the `@TestVisible` seam `IntegrationConfigService.setTestConfig(config)`, which `get()` honours only under `Test.isRunningTest()`. To test the parsing, build an `IntegrationDefinition__mdt` in memory and call `fromDefinition`; for the cache, call `cached`.
+
+`IntegrationExecutionJobTest` owns the callout infrastructure: a mock that counts calls, can throw a `CalloutException` and can steal the transaction mid-flight, plus a handler with five failure modes. `IntegrationHttpClient` still has no coverage of its own, and `IntegrationClaimJob` and `IntegrationRequest` are the two thinnest at 53% and 45%.

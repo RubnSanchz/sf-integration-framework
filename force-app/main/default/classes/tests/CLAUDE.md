@@ -1,0 +1,17 @@
+# classes/tests/
+
+One test class per production class, named `<Class>Test`. `IntegrationTestDataFactory` is the exception: it holds no tests, only shared data.
+
+
+- **Everything shared lives in `IntegrationTestDataFactory`:** the configuration seam, the transaction builders, the requery helpers and the test user. Add to it rather than copying a helper into a second test class, which is how the config builder ended up duplicated verbatim before.
+- **Tests run as a framework user, not as you.** `@TestSetup` calls `IntegrationTestDataFactory.createFrameworkUser()`, which creates a user on the `Minimum Access - Salesforce` profile and assigns `SF_Integration_Framework_Admin` and nothing else. Every test that touches `IntegrationTransaction__c` or `IntegrationAttempt__c` wraps its body in `System.runAs(IntegrationTestDataFactory.frameworkUser())`. Two reasons: the suite stops depending on whoever launches it, which is what would break `sf package version create` in a clean packaging org, and it proves the shipped permission set is enough on its own.
+- The user and its assignment are **setup objects**, so they cannot be inserted in the same transaction as business records. That is why they go in `@TestSetup` and not in a helper called from the test body.
+- **Custom Metadata cannot be inserted in a test.** Inject configuration through the `@TestVisible` seam `IntegrationConfigService.setTestConfig(config)`, which `get()` honours only under `Test.isRunningTest()`. To test the parsing itself, build an `IntegrationDefinition__mdt` in memory and call `fromDefinition`; to test the cache, call `cached`.
+- **Checkbox fields are never null on an sObject**: assigning `null` stores `false`. A record built in memory reads `false`, not the field's `defaultValue`, so set them explicitly when a test needs a realistic definition.
+- Test method names are full sentences in the third person, no `test` prefix, no underscores, and they state the expected behaviour rather than the mechanics: `expiredLeaseIsRescheduledWithoutCallingOut`.
+- Idempotency keys in test data are kebab-case `<scope>-<case>-<nnn>`, for example `exec-503-001`.
+- `IntegrationExecutionJobTest` holds the callout infrastructure: a mock that counts calls, can throw a `CalloutException` and can steal the transaction mid-flight, plus a handler with five failure modes selected through static state, because the factory instantiates it reflectively with no arguments.
+- **Two coverage limits are inherent, not neglect.** `IntegrationConstants` reports 0% from its private constructor; removing it does not help, the class then reports 0/0. And the part of `IntegrationConfigService.get()` past the test seam, plus `shortestRetentionDays()`, need deployed `IntegrationDefinition__mdt` records, which this package deliberately ships none of. Everything else is at 100%.
+- **Prefer a real failure over a test-only seam.** The claim job's error branch is reached by setting `AttemptCount__c` to the maximum its precision allows, so incrementing it overflows the field. No production code carries scaffolding for it.
+- A queueable that chains another cannot be enqueued from a test: only one job fits in the queue. Call `execute(null)` on it directly and the chained job gets the slot.
+- Assert that nothing was sent when nothing should have been. The call counter on the mock is the only way to prove a pre-callout branch really stopped before the callout.

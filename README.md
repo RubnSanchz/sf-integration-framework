@@ -53,6 +53,12 @@ Business transaction
 ```text
 force-app/main/default/
 |-- classes/
+|   |-- api/          consumer-facing surface
+|   |-- pipeline/     queueables and schedulables
+|   |-- services/     the classes that own the DML
+|   |-- policy/       pure decision logic, no DML
+|   |-- support/      http client, sanitizer, factory, constants
+|   `-- tests/
 |-- objects/
 |   |-- IntegrationTransaction__c/
 |   |-- IntegrationAttempt__c/
@@ -169,11 +175,46 @@ sf package install \
 
 Then:
 
-1. Assign `SF Integration Framework Admin` to administrators who need to inspect or manage framework records.
+1. Assign `SF Integration Framework Admin` to administrators who need to inspect or manage framework records, **and to any user whose transactions register integration work**. Registering inserts an `IntegrationTransaction__c`, which fails with "fields being inaccessible" if the running user has no field access.
 2. Configure the target org's Named Credential and External Credential.
 3. Create an `IntegrationDefinition__mdt` record for each integration.
 4. Implement an Apex class that implements `IntegrationOperationHandler`.
 5. Schedule dispatcher/recovery jobs if you want automatic recovery and draining of pending work.
+
+
+### Using the package from your own repository
+
+Your repository does not contain this package's source. You install a version of it, the same way you would any other dependency.
+
+Your repository contains only what is yours:
+
+- the Apex classes that implement `IntegrationOperationHandler`
+- your Named Credential and External Credential
+- your `IntegrationDefinition__mdt` records
+
+If you build your own package, declare this one as a dependency instead of copying it:
+
+```json
+"packageDirectories": [
+  {
+    "path": "force-app",
+    "default": true,
+    "dependencies": [
+      { "package": "sf-integration-framework@0.1.0-1" }
+    ]
+  }
+]
+```
+
+For scratch orgs, installing this package is part of setting the org up, not part of deploying your code:
+
+```bash
+sf package install --package <04t-package-version-id> --target-org <scratch-alias> --wait 20
+```
+
+**Do not copy this package's source into your repository.** The components install as ordinary, editable metadata, so a copy in your repository will be deployed over them by your own pipeline and will drift from the installed version. You would end up maintaining two sources of truth for the same classes.
+
+If you need to change the framework itself, fork the repository, build your own package version and install that. If you only want the source locally to read it, clone the repository at the tag matching your installed version, or add the classes to your `.forceignore` so your pipeline never deploys them.
 
 ## Configure an integration
 
@@ -192,7 +233,17 @@ Important fields:
 | `RetryableStatusCodes__c` | Comma-separated HTTP codes; defaults to `408,429,500,502,503,504` |
 | `IdempotencyEnabled__c` | Whether the remote system guarantees duplicate-safe processing for the configured key |
 | `IdempotencyHeader__c` | Header name, default `Idempotency-Key` |
+| `RetryEnabled__c` | Master switch for retries on this integration |
+| `RetentionDays__c` | Days a successful transaction is kept before the purge batch deletes it; defaults to 30 |
+| `MaxPayloadChars__c` | Persisted payloads are truncated to this length |
 | `LogRequestBody__c` / `LogResponseBody__c` | Explicit opt-in payload persistence |
+
+A definition is validated the first time it is read, and an invalid one fails
+the transaction it belongs to rather than misbehaving later. The rules:
+`TimeoutMs__c` between 1 and 120000; `ProcessingLeaseSeconds__c` at least the
+timeout plus 30 seconds, because a lease shorter than its own callout lets
+recovery reclaim work that is still running; `MaxPayloadChars__c` between 1
+and 32768; `MaxRetries__c` not negative; `RetryBaseDelaySeconds__c` at least 1.
 
 Do **not** enable `IdempotencyEnabled__c` merely because Salesforce generates a key. The remote API must actually consume and enforce that key.
 
@@ -269,6 +320,13 @@ System.schedule(
 );
 ```
 
+System.schedule(
+    'SIF Purge',
+    '0 0 3 * * ?',
+    new IntegrationPurgeBatch()
+);
+```
+
 The dispatcher picks up work that has never executed and work whose `Disposition__c` is `RETRY` with a due `NextRetryAt__c`. Recovery handles only what never reached a normal ending: expired processing leases, and uncertain outcomes awaiting evaluation. It only auto-requeues uncertain work when remote idempotency is configured.
 
 ### Reading and steering a transaction
@@ -284,6 +342,20 @@ The dispatcher picks up work that has never executed and work whose `Disposition
 | `TERMINAL` | Finished without success and there is nothing left to try. | Nothing, or `RETRY` to force another attempt. |
 
 To requeue a parked transaction by hand, set `Disposition__c` to `RETRY`. Leave `NextRetryAt__c` empty to have it dispatched on the next run, or set a date to delay it. Nothing else has to change: `Status__c` keeps recording what actually happened.
+
+### Keeping the tables from growing forever
+
+`IntegrationPurgeBatch` deletes transactions that finished successfully longer ago than their integration's `RetentionDays__c`, and their attempts follow through the master-detail relationship. Nothing else is ever deleted: a failure, an uncertain outcome or anything still waiting on a person is evidence, and keeping it is the point of the outbox.
+
+Every record counts as 2 KB against data storage whatever it actually contains, so one business operation that took three attempts occupies four records, about 8 KB. At a thousand operations a day that is roughly 8 MB a day, or 240 MB a month, which is why this is scheduled rather than optional.
+
+Deleted records sit in the recycle bin for 15 days and keep counting against storage until then. To reclaim it immediately, at the cost of making the deletion unrecoverable:
+
+```apex
+System.schedule('SIF Purge', '0 0 3 * * ?', new IntegrationPurgeBatch(200, true));
+```
+
+A transaction whose `IntegrationDefinition__mdt` no longer resolves is never purged. A missing definition is a configuration problem, not permission to delete the history.
 
 ## Security
 

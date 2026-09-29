@@ -2,22 +2,36 @@
 <Package xmlns="http://soap.sforce.com/2006/04/metadata">
     <types>
         <members>IntegrationAttemptService</members>
+        <members>IntegrationAttemptServiceTest</members>
         <members>IntegrationClaimJob</members>
+        <members>IntegrationClaimJobTest</members>
         <members>IntegrationConfigService</members>
         <members>IntegrationConstants</members>
-        <members>IntegrationCoreTest</members>
+        <members>IntegrationConfigServiceTest</members>
+        <members>IntegrationConstantsTest</members>
+        <members>IntegrationRecoverySchedulerTest</members>
+        <members>IntegrationRetryPolicyTest</members>
+        <members>IntegrationSanitizerTest</members>
+        <members>IntegrationTransactionServiceTest</members>
         <members>IntegrationDispatchScheduler</members>
+        <members>IntegrationDispatchSchedulerTest</members>
         <members>IntegrationExecutionJob</members>
         <members>IntegrationExecutionJobTest</members>
         <members>IntegrationFramework</members>
         <members>IntegrationHandlerFactory</members>
         <members>IntegrationHttpClient</members>
+        <members>IntegrationHandlerFactoryTest</members>
+        <members>IntegrationHttpClientTest</members>
+        <members>IntegrationRequestTest</members>
         <members>IntegrationOperationHandler</members>
+        <members>IntegrationPurgeBatch</members>
+        <members>IntegrationPurgeBatchTest</members>
         <members>IntegrationRecoveryScheduler</members>
         <members>IntegrationRequest</members>
         <members>IntegrationResponse</members>
         <members>IntegrationRetryPolicy</members>
         <members>IntegrationSanitizer</members>
+        <members>IntegrationTestDataFactory</members>
         <members>IntegrationTransactionService</members>
         <name>ApexClass</name>
     </types>
